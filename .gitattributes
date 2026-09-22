@@ -1,0 +1,16 @@
+*.sh text eol=lf
+router/opt/bin/awg3-split-config text eol=lf
+router/opt/etc/init.d/* text eol=lf
+
+*.md text eol=lf
+*.json text eol=lf
+*.py text eol=lf
+*.patch text eol=lf
+*.conf text eol=lf
+SHA256SUMS text eol=lf
+
+.gitignore text eol=lf
+*.yml text eol=lf
+*.patch -whitespace
+prebuilt/kn-1012/LICENSE-amneziawg-go text eol=lf
+prebuilt/kn-1012/COPYING-amneziawg-tools text eol=lf

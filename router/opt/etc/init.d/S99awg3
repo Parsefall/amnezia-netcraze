@@ -1,0 +1,224 @@
+#!/bin/sh
+# Userspace AWG3 for Entware. Only interfaces recorded in managed.tsv are owned.
+set -u
+umask 077
+PATH=/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin
+BASE=/opt/etc/awg3
+CONF=$BASE/conf
+PARSED=$CONF/parsed
+STATE=$BASE/managed.tsv
+RUN=/var/run/awg3
+SOCKETS=/var/run/amneziawg
+AWG=/opt/bin/awg
+ENGINE=/opt/bin/amneziawg-go
+SPLIT=/opt/bin/awg3-split-config
+WATCHDOG=/opt/etc/init.d/S100awg3-watchdog
+LOG=/opt/var/log/awg3.log
+mkdir -p "$BASE" "$PARSED" "$RUN" /opt/var/log || exit 1
+chmod 700 "$BASE" "$CONF" "$PARSED" "$RUN"
+log() (
+    if [ -f "$LOG" ] && [ "$(wc -c < "$LOG")" -gt 524288 ]; then mv -f "$LOG" "$LOG.1"; fi
+    printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$LOG"
+    printf '%s\n' "$*"
+)
+valid_index() { case "$1" in [0-9]|[1-9][0-9]) return 0;; *) return 1;; esac; }
+valid_source() (
+    name=${1##*/}
+    case "$name" in ''|.*|*[!A-Za-z0-9_.-]*|*.conf.conf) return 1;; *.conf) ;; *) return 1;; esac
+    [ "$1" = "$CONF/$name" ]
+)
+validate_state() (
+    [ -f "$STATE" ] || exit 0
+    awk -F '\t' 'NF!=3 || seen[$1]++ || indexes[$2]++ {exit 1}' "$STATE" || exit 1
+    while IFS="$(printf '\t')" read -r src idx ndms; do
+        valid_source "$src" && valid_index "$idx" && [ "$ndms" = "OpkgTun$idx" ] || exit 1
+    done < "$STATE"
+)
+ndms_exists() { ndmc -c "show interface $1" 2>/dev/null | grep -q '^[[:space:]]*type:'; }
+ndms_owned_type() { ndmc -c "show interface $1" 2>/dev/null | grep -Eq '^[[:space:]]*type: OpkgTun[[:space:]]*$'; }
+ndms_cmd() (
+    result=$(ndmc -c "$1" 2>&1) || { log "NDMS command failed: $1"; exit 1; }
+    if printf '%s\n' "$result" | grep -Eiq '(^|[[:space:]])(error|failed|invalid)([[]|:|[[:space:]])'; then
+        log "NDMS rejected: $1"; exit 1
+    fi
+)
+requirements() (
+    [ "$(uname -m)" = aarch64 ] || { log "ERROR: aarch64 router required"; exit 1; }
+    [ -c /dev/net/tun ] || { log "ERROR: /dev/net/tun missing"; exit 1; }
+    for tool in "$AWG" "$ENGINE" "$SPLIT"; do
+        [ -x "$tool" ] || { log "ERROR: missing executable $tool"; exit 1; }
+    done
+    for tool in ip ndmc awk mktemp; do command -v "$tool" >/dev/null || exit 1; done
+    "$ENGINE" --version >/dev/null && "$AWG" --version >/dev/null
+)
+# Process identity prevents signalling a recycled PID or another VPN daemon.
+engine_alive() (
+    iface=$1
+    [ -f "$RUN/$iface.pid" ] || exit 1
+    pid=$(cat "$RUN/$iface.pid")
+    case "$pid" in ''|*[!0-9]*) exit 1;; esac
+    [ "$pid" -gt 1 ] || exit 1
+    [ "$(readlink -f "/proc/$pid/exe" 2>/dev/null)" = "$(readlink -f "$ENGINE")" ] || exit 1
+    tr '\000' '\n' < "/proc/$pid/cmdline" | grep -Fxq "$iface"
+)
+ensure_engine() (
+    iface=$1
+    if engine_alive "$iface"; then
+        [ -S "$SOCKETS/$iface.sock" ] && "$AWG" show "$iface" >/dev/null 2>&1
+        exit $?
+    fi
+    # Recover a socket left by a dead process only with our PID record.
+    if [ -f "$RUN/$iface.pid" ] && ! ip link show "$iface" >/dev/null 2>&1; then
+        old_pid=$(cat "$RUN/$iface.pid")
+        case "$old_pid" in ''|*[!0-9]*) exit 1;; esac
+        [ "$old_pid" -gt 1 ] || exit 1
+        if ! kill -0 "$old_pid" 2>/dev/null; then rm -f "$SOCKETS/$iface.sock" "$RUN/$iface.pid"; fi
+    fi
+    if [ -S "$SOCKETS/$iface.sock" ]; then
+        log "ERROR: unverified UAPI socket for $iface; refusing takeover"
+        exit 1
+    fi
+    if ip link show "$iface" >/dev/null 2>&1; then
+        # NDMS restores a persistent plain TUN at boot. TUNSETIFF refuses an occupied queue.
+        idx=${iface#opkgtun}
+        [ -f "/sys/class/net/$iface/tun_flags" ] &&
+            awk -F '\t' -v i="$idx" '$2==i {found=1} END {exit !found}' "$STATE" &&
+            ndms_owned_type "OpkgTun$idx" || {
+                log "ERROR: $iface is not our NDMS TUN; refusing takeover"
+                exit 1
+            }
+    fi
+    # Foreground child has a known PID; detach its stdio from the SSH session.
+    WG_PROCESS_FOREGROUND=1 LOG_LEVEL=error "$ENGINE" -f "$iface" </dev/null >> "$LOG" 2>&1 &
+    pid=$!
+    printf '%s\n' "$pid" > "$RUN/$iface.pid"
+    n=0
+    while [ "$n" -lt 15 ]; do
+        if [ -S "$SOCKETS/$iface.sock" ] && "$AWG" show "$iface" >/dev/null 2>&1; then exit 0; fi
+        kill -0 "$pid" 2>/dev/null || break
+        n=$((n+1)); sleep 1
+    done
+    log "ERROR: engine did not become ready for $iface"
+    if engine_alive "$iface"; then kill -TERM "$pid"; fi
+    exit 1
+)
+parse_profile() (
+    "$SPLIT" "$1" "opkgtun$2" "OpkgTun$2"
+)
+configure() (
+    src=$1; idx=$2; iface=opkgtun$idx; ndms=OpkgTun$idx
+    # Parse before modifying any existing interface.
+    parse_profile "$src" "$idx" || exit 1
+    if ndms_exists "$ndms"; then
+        ndms_owned_type "$ndms" || { log "ERROR: unexpected NDMS interface type"; exit 1; }
+    else
+        ndms_cmd "interface $ndms" || exit 1
+    fi
+    ensure_engine "$iface" || exit 1
+    # Values never reach a shell; parser emits validated NDMS settings only.
+    "$AWG" setconf "$iface" "$PARSED/$iface.awg.conf" >/dev/null 2>&1 || { log "ERROR: awg rejected $src"; exit 1; }
+    name=${src##*/}; name=${name%.conf}
+    ndms_cmd "interface $ndms description $name" || exit 1
+    sh "$PARSED/$iface.ndms.sh" || { log "ERROR: NDMS settings rejected for $ndms"; exit 1; }
+    ip link set "$iface" up || exit 1
+    log "$ndms configured; handshake must be checked with status"
+)
+reserve() (
+    src=$1
+    idx=$(awk -F '\t' -v s="$src" '$1==s {print $2}' "$STATE")
+    if [ -n "$idx" ]; then printf '%s\n' "$idx"; exit 0; fi
+    idx=0
+    while [ "$idx" -le 99 ]; do
+        if ! awk -F '\t' -v i="$idx" '$2==i {found=1} END {exit !found}' "$STATE" &&
+           ! ip link show "opkgtun$idx" >/dev/null 2>&1 && ! ndms_exists "OpkgTun$idx"; then
+            cp "$STATE" "$STATE.new" || exit 1
+            printf '%s\t%s\tOpkgTun%s\n' "$src" "$idx" "$idx" >> "$STATE.new" || exit 1
+            mv -f "$STATE.new" "$STATE" || exit 1
+            printf '%s\n' "$idx"; exit 0
+        fi
+        idx=$((idx+1))
+    done
+    exit 1
+)
+start_service() (
+    requirements || exit 1
+    # Validate every profile first. A malformed file cannot disrupt a running VPN.
+    found=0
+    for src in "$CONF"/*.conf; do
+        [ -f "$src" ] || continue
+        valid_source "$src" || { log "ERROR: use simple ASCII profile filenames"; exit 1; }
+        validation=$(mktemp -d "$RUN/validate.XXXXXX") || exit 1
+        AWG3_PARSED_DIR="$validation" "$SPLIT" "$src" opkgtun99 OpkgTun99 >/dev/null
+        result=$?
+        rm -f "$validation/opkgtun99.awg.conf" "$validation/opkgtun99.ndms.sh"
+        rmdir "$validation"
+        [ "$result" -eq 0 ] || exit 1
+        found=1
+    done
+    [ "$found" -eq 1 ] || { log "ERROR: no profiles in $CONF"; exit 1; }
+    [ -f "$STATE" ] || : > "$STATE"
+    failed=0
+    : > "$RUN/running"
+    for src in "$CONF"/*.conf; do
+        [ -f "$src" ] || continue
+        idx=$(reserve "$src") || { failed=1; continue; }
+        configure "$src" "$idx" || failed=1
+    done
+    [ "$failed" -eq 0 ] || { log "Startup incomplete; check $LOG"; exit 1; }
+    if [ -f "$BASE/watchdog-enabled" ]; then "$WATCHDOG" start || exit 1; fi
+    log "Started. Autostart and saving firmware configuration are separate commands."
+)
+stop_service() (
+    rm -f "$RUN/running"
+    "$WATCHDOG" stop || exit 1
+    [ -f "$STATE" ] || exit 0
+    failed=0
+    while IFS="$(printf '\t')" read -r src idx ndms; do
+        if engine_alive "opkgtun$idx"; then ip link set "opkgtun$idx" down || failed=1; fi
+        if ndms_owned_type "$ndms"; then ndms_cmd "interface $ndms down" || failed=1; fi
+    done < "$STATE"
+    # Keep TUN processes and NDMS objects, retaining policy associations.
+    exit "$failed"
+)
+status() (
+    [ -f "$BASE/enabled" ] && echo 'Autostart: enabled' || echo 'Autostart: disabled'
+    [ -f "$RUN/running" ] && echo 'Service: started' || echo 'Service: stopped'
+    [ -s "$STATE" ] || { echo 'No managed tunnels'; exit 1; }
+    failed=0
+    while IFS="$(printf '\t')" read -r src idx ndms; do
+        echo "$ndms <- ${src##*/}"
+        if engine_alive "opkgtun$idx"; then
+            shown=$("$AWG" show "opkgtun$idx") || failed=1
+            printf '%s\n' "$shown" | sed 's/\(header protection key: \).*/\1(hidden)/'
+        else echo 'Engine: stopped'; failed=1; fi
+        ndmc -c "show interface $ndms" 2>/dev/null | grep -E '^[[:space:]]*(state|link|connected|uptime):' || true
+    done < "$STATE"
+    exit "$failed"
+)
+repair() (
+    idx=$1
+    valid_index "$idx" || exit 1
+    [ -f "$RUN/running" ] || { log 'Service intentionally stopped'; exit 1; }
+    src=$(awk -F '\t' -v i="$idx" '$2==i {print $1}' "$STATE")
+    [ -n "$src" ] && [ -f "$src" ] || exit 1
+    configure "$src" "$idx"
+)
+# Never steal a lock: after SIGKILL diagnose the PID before removing it manually.
+action=${1:-start}
+case "$action" in status) validate_state && status; exit $?;; esac
+mkdir "$RUN/service.lock" 2>/dev/null || { echo "Service busy ($RUN/service.lock)"; exit 1; }
+echo "$$" > "$RUN/service.lock/pid"
+trap 'rm -f "$RUN/service.lock/pid"; rmdir "$RUN/service.lock"' EXIT
+trap 'exit 1' HUP INT TERM
+validate_state || { log 'ERROR: invalid managed.tsv; refusing network changes'; exit 1; }
+case "$action" in
+    start) [ -f "$BASE/enabled" ] || { echo 'Autostart disabled; use up for a manual test'; exit 0; }; start_service;;
+    up) start_service;;
+    stop) stop_service;;
+    restart) stop_service && start_service;;
+    repair) repair "${2:-}";;
+    enable) : > "$BASE/enabled"; echo 'Autostart enabled (does not start VPN)';;
+    disable) rm -f "$BASE/enabled"; stop_service;;
+    save) ndms_cmd 'system configuration save';;
+    *) echo "Usage: $0 {up|start|stop|restart|status|repair N|enable|disable|save}"; exit 1;;
+esac

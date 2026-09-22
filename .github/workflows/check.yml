@@ -1,0 +1,19 @@
+name: Validate package
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell syntax
+        run: |
+          for f in router/install.sh router/uninstall.sh router/opt/bin/awg3-split-config router/opt/etc/init.d/S99awg3 router/opt/etc/init.d/S100awg3-watchdog; do sh -n "$f"; done
+      - name: Parser and service regressions
+        run: |
+          sh tests/test_split_config.sh
+          sh tests/test_parser_edge_cases.sh
+          sh tests/test_service.sh
+      - name: Validate binary metadata and package
+        run: python3 build/package.py

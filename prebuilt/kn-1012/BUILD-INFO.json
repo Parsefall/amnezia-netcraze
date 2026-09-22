@@ -1,0 +1,42 @@
+{
+  "target": {
+    "model": "Netcraze Giga NC-1012",
+    "arch": "aarch64",
+    "firmware_observed": "5.01.C.5.0-0",
+    "kernel_observed": "4.9-ndm-5"
+  },
+  "engine": {
+    "repo": "https://github.com/amnezia-vpn/amneziawg-go",
+    "tag": "v3.1.20260828",
+    "commit": "b5928efb6ca19f0153958460c3d141f04abc5c2e",
+    "patch": "build/patches/002-go-tun-padding-refresh.patch",
+    "patch_sha256": "0c7d431bb2ab18e50577ee58655963959ec6f5ce8d904d0c151e7a12cfbf373a",
+    "sha256": "4e7b39c5ad89011b2df07327e4deb867f12a0fb70e433bfa4cb068e417e8191e",
+    "compiler": "go1.25.14 windows/amd64",
+    "target": "linux/arm64",
+    "cgo": false,
+    "flags": [
+      "-trimpath",
+      "-buildvcs=true",
+      "-ldflags=-s -w"
+    ],
+    "upstream_version_constant": "0.0.20250522"
+  },
+  "cli": {
+    "version": "3.1.20260812",
+    "sha256": "b189e0244d59f837abfafd8c6a6fe8bf83450735a95f3104650596c2434033c3",
+    "provenance": "Original supplied repository binary; version and execution confirmed by user in earlier task, not rebuilt in this session",
+    "upstream": "https://github.com/amnezia-vpn/amneziawg-tools/tree/v3.1.20260812",
+    "source_commit": "ee0f0a9aa34ff0a0da4b3433b9512781cfe02843"
+  },
+  "toolchain_download": {
+    "filename": "go1.25.14.windows-amd64.zip",
+    "os": "windows",
+    "arch": "amd64",
+    "version": "go1.25.14",
+    "sha256": "119044a92b3987c341cd6aebb256676dd4780d292f7b4e72a3e9976677841697",
+    "size": 67591780,
+    "kind": "archive"
+  },
+  "router_validation": "Engine, handshake, traffic and boot observed on NC-1012 firmware 5.1.5; release wrapper changes host-tested only; outage failover untested"
+}

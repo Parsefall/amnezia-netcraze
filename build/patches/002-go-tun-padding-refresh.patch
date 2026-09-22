@@ -1,0 +1,30 @@
+diff --git a/device/send.go b/device/send.go
+index 2b0a475..370ba71 100644
+--- a/device/send.go
++++ b/device/send.go
+@@ -333,13 +333,24 @@ func (device *Device) RoutineReadFromTUN() {
+ 
+ 		// read packets
+ 		count, readErr = device.tun.device.Read(bufs, sizes, offset)
++		// Configuration may change while Read is blocked (including initial S4).
++		// Move payloads to the current padding offset before queueing encryption.
++		padding = device.paddings.transport.Load()
++		currentOffset := MessageTransportHeaderSize + int(padding)
+ 		for i := 0; i < count; i++ {
+ 			if sizes[i] < 1 {
+ 				continue
+ 			}
+ 
++			if sizes[i] > len(bufs[i])-currentOffset {
++				device.log.Verbosef("Dropping TUN packet after padding increase: insufficient buffer space")
++				continue
++			}
++			if currentOffset != offset {
++				copy(bufs[i][currentOffset:currentOffset+sizes[i]], bufs[i][offset:offset+sizes[i]])
++			}
+ 			elem := elems[i]
+-			elem.packet = bufs[i][offset : offset+sizes[i]]
++			elem.packet = bufs[i][currentOffset : currentOffset+sizes[i]]
+ 			elem.padding = padding
+ 
+ 			// lookup peer

@@ -1,0 +1,74 @@
+#!/bin/sh
+set -u
+umask 077
+PATH=/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin
+BASE=/opt/etc/awg3
+RUN=/var/run/awg3
+SELF=/opt/etc/init.d/S100awg3-watchdog
+SERVICE=/opt/etc/init.d/S99awg3
+AWG=/opt/bin/awg
+PIDFILE=$RUN/watchdog.pid
+mkdir -p "$RUN"
+alive() {
+    [ -f "$PIDFILE" ] || return 1
+    pid=$(cat "$PIDFILE")
+    case "$pid" in ''|*[!0-9]*) return 1;; esac
+    [ "$pid" -gt 1 ] && [ -r "/proc/$pid/cmdline" ] || return 1
+    tr '\000' '\n' < "/proc/$pid/cmdline" | grep -Fxq "$SELF" || return 1
+    tr '\000' '\n' < "/proc/$pid/cmdline" | grep -Fxq __run
+}
+check() (
+    [ -f "$BASE/watchdog-enabled" ] && [ -f "$RUN/running" ] || exit 0
+    [ -f "$BASE/managed.tsv" ] || exit 0
+    while IFS="$(printf '\t')" read -r src idx ndms; do
+        case "$idx" in [0-9]|[1-9][0-9]) ;; *) exit 1;; esac
+        [ "$ndms" = "OpkgTun$idx" ] || exit 1
+        [ -f "$src" ] || continue
+        # Handshake age is informational, not proof of a failed idle tunnel.
+        if ! "$AWG" show "opkgtun$idx" >/dev/null 2>&1; then
+            now=$(date +%s)
+            last=0
+            [ ! -f "$RUN/repair-$idx" ] || last=$(cat "$RUN/repair-$idx")
+            case "$last" in ''|*[!0-9]*) last=0;; esac
+            [ $((now-last)) -ge 180 ] || continue
+            printf '%s\n' "$now" > "$RUN/repair-$idx"
+            "$SERVICE" repair "$idx" || true
+        fi
+    done < "$BASE/managed.tsv"
+)
+cleanup() {
+    [ -z "${sleeper:-}" ] || kill "$sleeper" 2>/dev/null || true
+    rm -f "$PIDFILE"
+    rmdir "$RUN/watchdog.lock" 2>/dev/null || true
+}
+case "${1:-start}" in
+    __run)
+        mkdir "$RUN/watchdog.lock" 2>/dev/null || exit 1
+        echo "$$" > "$PIDFILE"
+        trap cleanup EXIT
+        trap 'exit 0' TERM INT HUP
+        while [ -f "$RUN/running" ] && [ -f "$BASE/watchdog-enabled" ]; do
+            check
+            sleep 30 & sleeper=$!
+            wait "$sleeper" || true
+            sleeper=
+        done;;
+    start)
+        [ -f "$RUN/running" ] && [ -f "$BASE/watchdog-enabled" ] || exit 0
+        alive && exit 0
+        "$SELF" __run </dev/null >/dev/null 2>&1 &
+        sleep 1
+        alive;;
+    stop)
+        if alive; then
+            kill -TERM "$pid" || exit 1
+            n=0
+            while alive && [ "$n" -lt 10 ]; do sleep 1; n=$((n+1)); done
+            if alive; then echo 'Watchdog did not stop'; exit 1; fi
+        fi;;
+    enable) : > "$BASE/watchdog-enabled"; "$SELF" start;;
+    disable) rm -f "$BASE/watchdog-enabled"; "$SELF" stop;;
+    check) check;;
+    status) if alive; then echo "Watchdog running: $pid"; else echo 'Watchdog stopped'; exit 1; fi;;
+    *) echo "Usage: $0 {start|stop|enable|disable|check|status}"; exit 1;;
+esac

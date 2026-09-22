@@ -1,0 +1,83 @@
+#!/bin/sh
+set -eu
+set -f
+umask 077
+INPUT=${1:-}
+LINUX_IFACE=${2:-opkgtun0}
+NDMS_IFACE=${3:-OpkgTun0}
+case "$LINUX_IFACE" in opkgtun[0-9]|opkgtun[0-9][0-9]) ;; *) echo 'ERROR: invalid Linux interface' >&2; exit 1;; esac
+[ "$NDMS_IFACE" = "OpkgTun${LINUX_IFACE#opkgtun}" ] || { echo 'ERROR: interface mismatch' >&2; exit 1; }
+[ -f "$INPUT" ] || { echo "Usage: $0 profile.conf [opkgtunN] [OpkgTunN]" >&2; exit 1; }
+OUTDIR=${AWG3_PARSED_DIR:-/opt/etc/awg3/conf/parsed}
+mkdir -p "$OUTDIR"
+TMP=$(mktemp -d "$OUTDIR/.parse.XXXXXX")
+trap 'rm -f "$TMP/awg" "$TMP/ndms"; rmdir "$TMP"' EXIT
+trap 'exit 1' HUP INT TERM
+awk -v a="$TMP/awg" -v n="$TMP/ndms" -v ndms="$NDMS_IFACE" '
+function fail(message) { print "ERROR: " message " (line " NR ")" > "/dev/stderr"; failed=1; exit 1 }
+function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+function ipv4(s,    parts,i) {
+    if (split(s,parts,".") != 4) return 0
+    for(i=1;i<=4;i++) if(parts[i] !~ /^[0-9]+$/ || parts[i]+0>255 || (length(parts[i])>1 && substr(parts[i],1,1)=="0")) return 0
+    return 1
+}
+function mask(p,    i,b,m) {
+    m=""
+    for(i=0;i<4;i++) { b=p-i*8; if(b<0)b=0; if(b>8)b=8; m=m (i?".":"") (256-2^(8-b)) }
+    return m
+}
+BEGIN {
+    print "#!/bin/sh\nset -eu\nNDMS_IFACE=" ndms > n
+    print "ndmc() {" > n
+    print "    response=$(command ndmc \"$@\" 2>&1) || { echo \"NDMS command failed\" >&2; return 1; }" > n
+    print "    if printf \047%s\\n\047 \"$response\" | grep -Eiq \047(^|[[:space:]])(error|failed|invalid)([[]|:|[[:space:]])\047; then echo \"NDMS rejected a setting\" >&2; return 1; fi" > n
+    print "}" > n
+}
+{
+    sub(/\r$/, ""); line=trim($0)
+    if(line=="" || line ~ /^[#;]/) next
+    if(tolower(line)=="[interface]") {
+        if(interface_seen || peers) fail("duplicate/out-of-order Interface")
+        interface_seen=1; section="interface"; print "[Interface]" > a; next
+    }
+    if(tolower(line)=="[peer]") {
+        if(!interface_seen) fail("Peer before Interface")
+        if(peers++) fail("only one Peer per profile is supported")
+        section="peer"; print "\n[Peer]" > a; next
+    }
+    eq=index(line,"="); if(!eq) fail("malformed setting")
+    key=trim(substr(line,1,eq-1)); value=trim(substr(line,eq+1))
+    if(value=="") fail("empty " key)
+    if(seen[section SUBSEP key]++) fail("duplicate " key)
+    if(section=="interface" && key=="Address") {
+        if(index(value,",") || index(value,":")) fail("exactly one IPv4 Address is supported")
+        if(split(value,cidr,"/")!=2 || !ipv4(cidr[1]) || cidr[2] !~ /^[0-9]+$/ || cidr[2]+0>32) fail("invalid IPv4 CIDR")
+        print "ndmc -c \"interface $NDMS_IFACE ip address " cidr[1] " " mask(cidr[2]+0) "\"" > n
+    } else if(section=="interface" && key=="MTU") {
+        if(value !~ /^[0-9]+$/ || value+0<576 || value+0>9000) fail("invalid MTU")
+        print "ndmc -c \"interface $NDMS_IFACE ip mtu " value "\"" > n
+    } else if(section=="interface" && key=="DNS") {
+        count=split(value,dns,",")
+        for(i=1;i<=count;i++) {
+            dns[i]=trim(dns[i]); if(!ipv4(dns[i])) fail("DNS must contain IPv4 addresses")
+            print "ndmc -c \"ip name-server " dns[i] " \\\"\\\" on $NDMS_IFACE\"" > n
+        }
+    } else if(section=="interface" && key ~ /^(PrivateKey|ListenPort|FwMark|Jc|Jmin|Jmax|S[1-4]|H[1-4]|I[1-5]|HeaderProtectionKey|ContentPaddingAddition|RekeyAfterTime|RekeyTimeout|RejectAfterTime|KeepaliveTimeout|MaxHandshakeAttempts|RandomTrailers|DisableCookies)$/) {
+        print key " = " value > a
+    } else if(section=="peer" && key ~ /^(PublicKey|PresharedKey|AllowedIPs|Endpoint|PersistentKeepalive)$/) {
+        if(key=="AllowedIPs" && index(value,":")) fail("IPv6 routing is not supported; use an IPv4-only profile")
+        print key " = " value > a
+    } else fail("unsupported parameter: " key)
+}
+END {
+    if(failed) exit 1
+    if(!seen["interface" SUBSEP "PrivateKey"] || !seen["interface" SUBSEP "Address"] || !seen["peer" SUBSEP "PublicKey"] || !seen["peer" SUBSEP "AllowedIPs"] || !seen["peer" SUBSEP "Endpoint"]) { print "ERROR: required profile fields missing" > "/dev/stderr"; exit 1 }
+    print "ndmc -c \"interface $NDMS_IFACE ip global auto\"" > n
+    print "ndmc -c \"interface $NDMS_IFACE ip tcp adjust-mss pmtu\"" > n
+    print "ndmc -c \"interface $NDMS_IFACE up\"" > n
+}' "$INPUT"
+chmod 600 "$TMP/awg"
+chmod 700 "$TMP/ndms"
+mv -f "$TMP/awg" "$OUTDIR/$LINUX_IFACE.awg.conf"
+mv -f "$TMP/ndms" "$OUTDIR/$LINUX_IFACE.ndms.sh"
+echo "Validated: $LINUX_IFACE / $NDMS_IFACE"
