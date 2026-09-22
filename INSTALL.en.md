@@ -12,6 +12,35 @@ Create a **separate client for the router** on your VPN server and export its Am
 
 Examples use `192.168.1.1` and SSH port **22**, as tested. Replace `22` if your Entware SSH server uses another port. SCP uses uppercase `-P`; SSH uses lowercase `-p`. The session must open a shell with a prompt such as `~ #`, not only the firmware CLI.
 
+## 0. If you only have an Amnezia key
+
+The installer needs a **complete AmneziaWG `.conf` configuration**, not a `vpn://…` string, a `.vpn` file, a QR code, or a standalone PrivateKey. Renaming `.vpn` to `.conf` does not convert it. This project does not automatically decode connection keys.
+
+### Your own Amnezia server
+
+1. Open AmneziaVPN using a connection with full access to your server.
+2. Open Share VPN, create a separate user for the router, and choose the **AmneziaWG** protocol.
+3. Select **AmneziaWG native format**, not the format for the AmneziaVPN app. Labels may vary between application versions.
+4. Save the `.conf` file, for example `amnezia_for_awg.conf`, and rename a copy to `router.conf` for the commands below.
+
+If someone only gave you a guest `vpn://` key, ask them for a **separate native-format AmneziaWG profile for the router**. Possessing a key does not necessarily grant export or server administration permissions.
+
+[Official export instructions](https://docs.amnezia.org/documentation/instructions/amnezia-hosting-sharing/).
+
+### Amnezia Premium
+
+Open the Personal Dashboard using the official email/app link, sign in with your subscription key, find Configuration Files, and download a `.conf` for the desired location. Generating a configuration uses a connection slot. Do not paste a subscription key into router.conf.
+
+Amnezia documents these configurations as AWG 3.1, but **Amnezia Premium has not been separately tested with this project**. Automatic subscription updates are not implemented: a revoked or changed configuration requires a new file.
+
+[Official Personal Dashboard instructions](https://docs.amnezia.org/documentation/instructions/personal_dashboard/).
+
+### Recognizing a suitable file
+
+Inspect the file locally without sharing its contents. Expect `[Interface]` and `[Peer]` sections, Address, PrivateKey, PublicKey, AllowedIPs, Endpoint, and the server-issued AmneziaWG parameters. All connection settings are required, not just a key. These field names alone do not replace parser and server validation.
+
+The installer does not accept VLESS/XRay/OpenVPN or other configuration formats. Step 3 covers IPv4 limitations and preparing a copy. Once you have a suitable router.conf, proceed to step 1.
+
 ## 1. Download and verify — Windows PowerShell
 
 Download the archive and `.sha256` from the [release](https://github.com/Parsefall/amnezia-netcraze/releases/latest) into the same folder. Open PowerShell **in that folder** (`PS C:\...>`):

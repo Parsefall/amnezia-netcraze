@@ -6,6 +6,8 @@ AmneziaWG 3.1 на Netcraze через Entware: готовый ARM64-пакет,
 
 **Проверено только на конкретном Netcraze Giga NC-1012 владельца проекта:** аппаратная ревизия `1210C000`, ARM64 (`aarch64`), прошивка **5.1.5 / 5.01.C.5.0-0**, Linux **4.9-ndm-5**, Entware на накопителе и `/dev/net/tun`. Совместимость с другими моделями и прошивками не заявляется.
 
+Если у вас только `vpn://`-ключ, сначала прочитайте [как получить .conf](INSTALL.md). Прямой импорт ключей не поддерживается.
+
 ## Скачать и установить
 
 1. Скачайте `awg3-netcraze-arm64-userspace.tar.gz` и `.sha256` из [Releases](https://github.com/Parsefall/amnezia-netcraze/releases/latest).
