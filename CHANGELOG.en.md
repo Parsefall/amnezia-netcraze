@@ -2,6 +2,14 @@
 
 [Русский](CHANGELOG.md) | **English**
 
+## 0.2.0 — Amnezia profile converter
+
+- Offline .vpn/vpn:// to router.conf conversion, with RU/EN GUI and CLI.
+- Extracts embedded AWG profiles from Qt qCompress/Base64URL exports without contacting servers.
+- Explicit IPv6 removal, validation, bounded decompression, and no output overwrites.
+- Subscription/API and administrative exports without client profiles produce an actionable error.
+- Standalone converter ZIP and updated RU/EN instructions. VPN engine and router service are unchanged.
+
 ## 0.1.1 — bilingual documentation
 
 - Complete Russian and English documentation with language links.

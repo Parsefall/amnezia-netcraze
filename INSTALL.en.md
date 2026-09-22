@@ -14,7 +14,9 @@ Examples use `192.168.1.1` and SSH port **22**, as tested. Replace `22` if your 
 
 ## 0. If you only have an Amnezia key
 
-The installer needs a **complete AmneziaWG `.conf` configuration**, not a `vpn://…` string, a `.vpn` file, a QR code, or a standalone PrivateKey. Renaming `.vpn` to `.conf` does not convert it. This project does not automatically decode connection keys.
+If you have a **`.vpn` file or `vpn://…` key**, use the [offline converter](docs/CONVERTER.en.md): download the converter ZIP from the release, extract it, run `python tools/convert_profile.py --gui --lang en` (Python 3.10+ with tkinter required), select the file or paste the key, and save router.conf. Then proceed to step 1.
+
+The converter extracts an embedded AWG client profile; subscription or full-access keys may not contain one. In that case, use the export methods below. Renaming .vpn to .conf does not convert it. A QR code or standalone PrivateKey is not sufficient.
 
 ### Your own Amnezia server
 

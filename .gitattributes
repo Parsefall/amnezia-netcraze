@@ -14,3 +14,5 @@ SHA256SUMS text eol=lf
 *.patch -whitespace
 prebuilt/kn-1012/LICENSE-amneziawg-go text eol=lf
 prebuilt/kn-1012/COPYING-amneziawg-tools text eol=lf
+
+*.cmd text eol=lf

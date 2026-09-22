@@ -8,6 +8,8 @@ import tarfile
 
 root = Path(__file__).resolve().parent.parent
 names = [
+    "tools/convert_profile.py", "tools/converter_gui.py", "convert-profile.cmd",
+    "docs/CONVERTER.md", "docs/CONVERTER.en.md",
     "README.md", "INSTALL.md", "ARCHITECTURE.md", "VALIDATION.md",
     "README.en.md", "INSTALL.en.md", "ARCHITECTURE.en.md", "VALIDATION.en.md",
     "NOTICE.en.md", "CHANGELOG.en.md", "docs/ROUTING.en.md",
@@ -55,3 +57,24 @@ with tarfile.open(destination) as archive:
     for member in archive:
         assert archive.extractfile(member).read() == payload[member.name.removeprefix("awg3-userspace/")]
 print(json.dumps({"archive":str(destination),"sha256":digest,"files":len(payload)}, indent=2))
+
+# Small offline PC utility download, separate from the router installation payload.
+import zipfile
+converter_names = ["convert-profile.cmd", "tools/convert_profile.py", "tools/converter_gui.py",
+                   "docs/CONVERTER.md", "docs/CONVERTER.en.md"]
+converter_payload = {name: (root/name).read_bytes() for name in converter_names}
+converter_manifest = "".join(hashlib.sha256(data).hexdigest()+"  "+name+"\n" for name, data in sorted(converter_payload.items()))
+converter_payload["SHA256SUMS"] = converter_manifest.encode("ascii")
+converter_dest = root/"outputs/amnezia-netcraze-converter.zip"
+with zipfile.ZipFile(converter_dest, "w", compression=zipfile.ZIP_DEFLATED) as zipped:
+    for name, data in sorted(converter_payload.items()):
+        info = zipfile.ZipInfo("amnezia-netcraze-converter/"+name)
+        info.compress_type = zipfile.ZIP_DEFLATED
+        zipped.writestr(info, data)
+with zipfile.ZipFile(converter_dest) as zipped:
+    assert len(zipped.namelist()) == len(converter_payload)
+    for name, data in converter_payload.items():
+        assert zipped.read("amnezia-netcraze-converter/"+name) == data
+converter_digest = hashlib.sha256(converter_dest.read_bytes()).hexdigest()
+converter_dest.with_suffix(".zip.sha256").write_text(converter_digest+"  "+converter_dest.name+"\n", encoding="ascii")
+print(json.dumps({"converter": str(converter_dest), "sha256": converter_digest}, indent=2))

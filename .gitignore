@@ -11,3 +11,7 @@ __pycache__/
 !/router/opt/etc/awg3/conf/awg3_example.conf
 /router/opt/etc/awg3/managed.tsv
 /router/opt/etc/awg3/conf/parsed/
+
+# Local converter inputs and outputs
+*.vpn
+/router.conf

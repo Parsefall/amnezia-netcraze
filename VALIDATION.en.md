@@ -40,3 +40,7 @@ RoutineReadFromTUN read S4 before a blocking Read. Changing S4 while waiting cou
 Before the patch, TestAWGDevicePing and an additional test reproduced the failure. After it, device/conn/replay/tai64n passed, along with 10 repetitions of TestRouterAWG31Profile (in-memory/UDP), TestRouterS4ChangeWhileReadBlocked, and TestAWGDevicePing: 70 test/subtest results, zero failures. Regression source is in tests/go_profile_smoke_test.go. These were Windows host tests, not router performance measurements.
 
 Not verified: IPv6, every combination of AWG parameters, long-term stability, throughput limits, Docker build path, or failover during an actual outage. The awg CLI binary was inherited from the original project; its version and execution were confirmed, but bit-for-bit build reproducibility was not established.
+
+## Converter 0.2.0
+
+14 automated tests with synthetic keys cover qCompress/Base64URL and JSON exports, AWG parameter preservation, explicit IPv6 handling, damaged and oversized input, multiple profiles, absent client configuration, private no-overwrite output, and CLI behavior. Converted output was also checked with the project's actual shell parser. The converter has not processed the user's real .vpn export yet; manual GUI testing has not been performed. VPN-engine and failover validation status is unchanged.
