@@ -1,5 +1,7 @@
 # Архитектура userspace-интеграции
 
+**Русский** | [English](ARCHITECTURE.en.md)
+
 `S99awg3` → `amneziawg-go -f opkgtunN` → TUN ядра.
 `awg setconf` передаёт параметры по Unix-сокету
 `/var/run/amneziawg/opkgtunN.sock`. Модуль amneziawg.ko не загружается.

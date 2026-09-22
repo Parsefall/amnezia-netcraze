@@ -1,5 +1,7 @@
 # Установка Amnezia Netcraze
 
+**Русский** | [English](INSTALL.en.md)
+
 ## Подготовка
 
 Нужны установленный Entware, доступ root к его shell, накопитель с `/opt` и `/dev/net/tun`. Проверенная модель и прошивка указаны в [README](README.md). Это не инструкция по первоначальной настройке Entware.

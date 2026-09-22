@@ -9,6 +9,9 @@ import tarfile
 root = Path(__file__).resolve().parent.parent
 names = [
     "README.md", "INSTALL.md", "ARCHITECTURE.md", "VALIDATION.md",
+    "README.en.md", "INSTALL.en.md", "ARCHITECTURE.en.md", "VALIDATION.en.md",
+    "NOTICE.en.md", "CHANGELOG.en.md", "docs/ROUTING.en.md",
+    "docs/HEALTHCHECK.en.md", "docs/TROUBLESHOOTING.en.md", "docs/BUILD.en.md",
     "NOTICE.md", "CHANGELOG.md", "docs/ROUTING.md", "docs/HEALTHCHECK.md",
     "docs/TROUBLESHOOTING.md", "docs/BUILD.md", "build/prepare_profile.py",
     "build/patches/002-go-tun-padding-refresh.patch",
