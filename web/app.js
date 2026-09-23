@@ -10,23 +10,29 @@ Object.assign(en,{connected:'Connected',disconnected:'Disconnected',unverified:'
 Object.assign(ru,{connected:'Подключено',disconnected:'Отключено',unverified:'Связь не проверена',partial:'Часть туннелей недоступна',rename:'Переименовать',renamePrompt:'Отображаемое имя (1–64: латиница, цифры, пробелы, точка, дефис или подчёркивание). Имя файла профиля не меняется:',profileId:'Файл профиля: ',checkNeeded:'Для проверки связи включите PingCheck в разделе «Диагностика».'});
 Object.assign(en,{journal:'Log',addTunnel:'Add tunnel',close:'Close',displayName:'Tunnel name',nameRules:'Latin letters, digits, spaces, dot, dash or underscore. The profile filename stays unchanged.',deleteTunnel:'Delete tunnel',deleteHint:'The tunnel will be stopped and removed. A private backup remains on the router. Save router configuration after deletion.',deleteConfirm:'Delete this tunnel and its firmware interface? ',targetHint:'Replacement affects only the selected tunnel. New tunnels need a unique Latin name.',empty:'No tunnels yet. Add one on the Tunnels tab.',checkNeeded:'Enable PingCheck in this tunnel’s settings to verify connectivity.',tunnelSettings:'Tunnel settings',replaceKey:'Replace VPN key',createStart:'Create and start',tunnelStart:'Start',tunnelPause:'Pause',newHint:'Use a separate Amnezia client key for every tunnel. Routes and device policies are configured in Netcraze.',needsInterface:'Start this tunnel once to configure its name and PingCheck.'});
 Object.assign(ru,{journal:'Журнал',addTunnel:'Добавить туннель',close:'Закрыть',displayName:'Название туннеля',nameRules:'Латиница, цифры, пробелы, точка, дефис или подчёркивание. Имя файла профиля не меняется.',deleteTunnel:'Удалить туннель',deleteConfirm:'Удалить этот туннель и его интерфейс в прошивке? ',empty:'Туннелей пока нет. Добавьте первый во вкладке «Туннели».',checkNeeded:'Для проверки связи включите PingCheck в настройках этого туннеля.',tunnelSettings:'Настройки туннеля',replaceKey:'Заменить ключ VPN',createStart:'Создать и запустить',tunnelStart:'Запустить',tunnelPause:'Приостановить',newHint:'Отдельный клиентский ключ Amnezia для каждого туннеля. Маршруты и политики устройств задаются в Netcraze.',needsInterface:'Сначала запустите туннель, чтобы настроить имя и PingCheck.'});
+Object.assign(en,{appUpdate:'Application update',installedVersion:'Installed version',latestVersion:'Latest release',checkUpdate:'Check for updates',installUpdate:'Update',releaseDetails:'Release notes',updateHint:'GitHub updates retain keys and settings. The panel restarts; sign in again afterwards. VPN engine changes require a manual update.',updateConfirm:'Install this release from the project GitHub repository? The panel will restart: ',updateIdle:'No update running.',updateLatest:'The installed version is up to date.',updateAvailable:'An update is available.',updateReconnect:'Updating. Waiting for the panel to restart…',queued:'Queued',downloading:'Downloading',verifying:'Verifying package',preparing:'Preparing backup',installing:'Installing',restarting:'Restarting panel',rolling_back:'Restoring previous version',complete:'Update completed',failed:'Update failed',rolled_back:'Previous version restored',rollback_failed:'Restore failed. Use SSH and the update backup.',interrupted:'Update interrupted. Inspect the backup before retrying.',update_busy:'An application update is already running.',vpn_service_busy:'VPN service is busy. Try again later.',no_new_version:'No newer version to install.',check_update_first:'Check for updates first.',github_unavailable_check_network_ca_bundle:'Cannot reach GitHub. Check the router connection, clock and ca-bundle package.',release_assets_missing:'Release files are not yet available. Try checking again later.',engine_changed_manual_update_required:'This release changes VPN binaries. Nothing was installed; a manual update is required.',manual_update_required:'This release requires a manual update.',not_enough_storage:'Not enough free storage on /opt.',archive_checksum_mismatch:'Archive checksum mismatch. Nothing was installed.',file_checksum_mismatch:'Package file checksum mismatch. Nothing was installed.',unsafe_archive:'Unsafe archive rejected.',package_version_mismatch:'Package version mismatch.',interrupted_manual_recovery:'The update was interrupted during installation. Recover using the backup over SSH.',update_failed:'The update failed. Inspect its backup and worker log over SSH.',worker_start_failed:'Unable to start the update worker.',installation_not_started:'Installation could not start; application files were not changed.',panel_healthcheck_failed:'The panel did not pass its startup check.'});
+Object.assign(ru,{appUpdate:'Обновление приложения',updateConfirm:'Установить этот релиз из GitHub проекта? Панель перезапустится: ',updateIdle:'Обновление не выполняется.',updateLatest:'Установлена актуальная версия.',updateAvailable:'Доступно обновление.',updateReconnect:'Идёт обновление. Ожидаю перезапуска панели…',queued:'В очереди',downloading:'Скачивание',verifying:'Проверка пакета',preparing:'Создание резервной копии',installing:'Установка',restarting:'Перезапуск панели',rolling_back:'Возврат предыдущей версии',complete:'Обновление завершено',failed:'Обновление не выполнено',rolled_back:'Предыдущая версия восстановлена',rollback_failed:'Восстановление не удалось. Нужен доступ по SSH и резервная копия обновления.',interrupted:'Обновление прервано. Проверьте резервную копию перед повторной попыткой.',update_busy:'Уже выполняется обновление приложения.',vpn_service_busy:'VPN-служба занята. Повторите позже.',no_new_version:'Более новой версии для установки нет.',check_update_first:'Сначала проверьте обновления.',github_unavailable_check_network_ca_bundle:'Нет связи с GitHub. Проверьте подключение роутера, время и пакет ca-bundle.',release_assets_missing:'Файлы релиза ещё недоступны. Повторите проверку позже.',engine_changed_manual_update_required:'В релизе изменены бинарники VPN. Ничего не установлено; требуется ручное обновление.',manual_update_required:'Этот релиз требует ручного обновления.',not_enough_storage:'Недостаточно свободного места на накопителе /opt.',archive_checksum_mismatch:'Контрольная сумма архива не совпала. Ничего не установлено.',file_checksum_mismatch:'Контрольные суммы файлов не совпали. Ничего не установлено.',unsafe_archive:'Небезопасный архив отклонён.',package_version_mismatch:'Версия пакета не совпадает с релизом.',interrupted_manual_recovery:'Обновление прервано во время установки. Требуется восстановление из копии через SSH.',update_failed:'Обновление не выполнено. Проверьте резервную копию и журнал обновления через SSH.',worker_start_failed:'Не удалось запустить процесс обновления.',installation_not_started:'Установка не началась; файлы приложения не изменены.',panel_healthcheck_failed:'Панель не прошла проверку после запуска.'});
 const original=new Map([...document.querySelectorAll('[data-i18n]')].map(el=>[el,el.textContent]));
 const t=key=>(lang==='en'?en[key]:ru[key])||key;
-let selected=null,creating=false;
+let selected=null,creating=false,updateInfo=null,updateTimer=null;
 function node(tag,text,cls){const el=document.createElement(tag);if(text!==undefined)el.textContent=text;if(cls)el.className=cls;return el;}
 function notice(text,error=false){$('notice').textContent=text;$('notice').classList.toggle('error',error);$('notice').hidden=false;}
 function showView(id){document.querySelectorAll('.view').forEach(el=>el.hidden=el.id!==id);document.querySelectorAll('.tab').forEach(el=>el.classList.toggle('active',el.dataset.view===id));}
 function closeEditor(){selected=null;creating=false;$('tunnel-editor').hidden=true;$('profile-key').value='';$('profile-file').value='';}
 function current(){return state?.tunnels.find(x=>x.profile===selected);}
 function signedIn(yes){$('login').hidden=yes;$('dashboard').hidden=!yes;$('logout').hidden=!yes;if(!yes){csrf='';state=null;closeEditor();for(const id of ['current-password','new-password','repeat-password'])$(id).value='';}}
-async function api(path,data){const response=await fetch(path,{method:data?'POST':'GET',credentials:'same-origin',headers:data?{'Content-Type':'application/json','X-CSRF-Token':csrf}:{},body:data?JSON.stringify(data):undefined,cache:'no-store'});const result=await response.json();if(!response.ok){if(response.status===401)signedIn(false);throw Error(result.error||t('error'));}return result;}
+async function api(path,data){const response=await fetch(path,{method:data?'POST':'GET',credentials:'same-origin',headers:data?{'Content-Type':'application/json','X-CSRF-Token':csrf}:{},body:data?JSON.stringify(data):undefined,cache:'no-store'});const result=await response.json();if(!response.ok){if(response.status===401)signedIn(false);throw Error(result.error?t(result.error):t('error'));}return result;}
 async function perform(fn){if(busy)return;busy=true;updateButtons();try{await fn();}catch(error){notice(error.message||t('error'),true);try{await refresh();}catch{}}finally{busy=false;updateButtons();}}
 function updateButtons(){
  document.querySelectorAll('button,input,textarea,select').forEach(el=>el.disabled=busy);
  if(!state)return;
+ const updating=Boolean(state.update?.active);
+ if(updating)document.querySelectorAll('button,input,textarea,select').forEach(el=>{if(!['logout','language','refresh'].includes(el.id)&&!el.dataset.view)el.disabled=true;});
  const rules={up:state.running,stop:!state.started,enable:state.enabled,disable:!state.enabled};
- for(const [action,disabled] of Object.entries(rules)){const el=document.querySelector('[data-action="'+action+'"]');if(el)el.disabled=busy||state.busy||disabled;}
- for(const el of document.querySelectorAll('[data-tunnel-action]')){const tunnel=state.tunnels.find(x=>x.profile===el.dataset.name);el.disabled=busy||state.busy||!tunnel||(el.dataset.tunnelAction==='tunnel-up'?tunnel.active:(!state.started||tunnel.paused||tunnel.stopped));}
+ for(const [action,disabled] of Object.entries(rules)){const el=document.querySelector('[data-action="'+action+'"]');if(el)el.disabled=busy||updating||state.busy||disabled;}
+ for(const el of document.querySelectorAll('[data-tunnel-action]')){const tunnel=state.tunnels.find(x=>x.profile===el.dataset.name);el.disabled=busy||updating||state.busy||!tunnel||(el.dataset.tunnelAction==='tunnel-up'?tunnel.active:(!state.started||tunnel.paused||tunnel.stopped));}
+ $('check-update').disabled=busy||updating;
+ $('install-update').disabled=busy||updating||!updateInfo?.available;
 }
 function translate(){document.documentElement.lang=lang;$('language').textContent=lang==='ru'?'EN':'RU';for(const [el,text] of original)el.textContent=lang==='en'?(en[el.dataset.i18n]||text):text;if(state)render(state);}
 function bytes(n){for(const unit of ['B','KiB','MiB','GiB','TiB']){if(n<1024||unit==='TiB')return `${n.toFixed(n<10?1:0)} ${unit}`;n/=1024;}}
@@ -54,6 +60,7 @@ function renderEditor(){
  for(const backup of backups){const row=node('div',undefined,'backup-row'),button=node('button',t('restore'));row.append(node('small',new Date(backup.time*1000).toLocaleString(lang)),button);button.onclick=()=>{if(confirm(t('confirmRestore')+tunnel.name))perform(async()=>{notice((await api('/api/action',{action:'restore',backup:backup.id})).message);await refresh();});};$('backup-list').append(row);}
 }
 function render(s){
+ renderUpdate(s.update);
  $('enabled-state').textContent=t(s.enabled?'enabled':'disabled');$('watchdog-state').textContent=t(s.watchdog?'enabled':'disabled');$('connection-state').textContent=t(s.tunnels.length&&s.tunnels.every(x=>x.connection==='connected')?'connected':s.tunnels.some(x=>x.connection==='unverified')?'unverified':s.tunnels.some(x=>x.connection==='connected')?'partial':'disconnected');$('updated').textContent=t('updated')+new Date().toLocaleTimeString(lang);
  $('overview-list').replaceChildren();$('tunnel-list').replaceChildren();
  if(!s.tunnels.length){$('overview-list').append(node('p',t('empty'),'muted'));$('tunnel-list').append(node('p',t('empty'),'muted'));}
@@ -86,6 +93,33 @@ $('password-form').onsubmit=event=>{event.preventDefault();if($('new-password').
 $('ping-form').onsubmit=event=>{event.preventDefault();const iface=current()?.interface;if(!iface)return;if(!confirm(t('pingConfirm')+current().name+'?'))return;const body={action:'pingcheck-apply',interface:iface,host:$('ping-host').value.trim(),'update-interval':Number($('ping-interval').value),timeout:Number($('ping-timeout').value),'max-fails':Number($('ping-fails').value),'min-success':Number($('ping-success').value)};perform(async()=>{notice((await api('/api/action',body)).message);await refresh();});};
 $('ping-disable').onclick=()=>{const iface=current()?.interface;if(iface&&confirm(t('confirm')+$('ping-disable').textContent))perform(async()=>{notice((await api('/api/action',{action:'pingcheck-disable',interface:iface})).message);await refresh();});};
 $('firmware-save').onclick=$('ping-save').onclick=()=>{if(confirm(t('pingSaveConfirm')))perform(async()=>notice((await api('/api/action',{action:'pingcheck-save'})).message));};
+function renderUpdate(info){
+ if(!info)return;updateInfo=info;
+ $('installed-version').textContent='v'+info.current;$('latest-version').textContent=info.latest||'—';
+ const progress=info.progress||{},phase=progress.phase||'idle';
+ let message=phase==='idle'?t(info.latest?(info.available?'updateAvailable':'updateLatest'):'updateIdle'):t(phase);
+ if(progress.error&&progress.error!==phase)message+=' · '+t(progress.error);
+ if(progress.backup)message+=' · '+progress.backup;
+ $('update-progress').textContent=message;
+ const link=$('release-link');link.hidden=!info.release_url;if(info.release_url)link.href=info.release_url;
+ if(info.active)watchUpdate();
+}
+function watchUpdate(){
+ if(updateTimer)return;
+ let polls=0;
+ updateTimer=setInterval(async()=>{
+  if(++polls>150){clearInterval(updateTimer);updateTimer=null;return;}
+  try{
+   const response=await fetch('/api/update/status',{credentials:'same-origin',cache:'no-store'});
+   if(response.status===401){clearInterval(updateTimer);updateTimer=null;location.reload();return;}
+   if(!response.ok)return;
+   const info=await response.json();renderUpdate(info);if(state)state.update=info;updateButtons();
+   if(!info.active){clearInterval(updateTimer);updateTimer=null;if(info.progress?.phase==='complete')location.reload();}
+  }catch{notice(t('updateReconnect'));}
+ },2000);
+}
+$('check-update').onclick=()=>perform(async()=>{const info=await api('/api/action',{action:'update-check'});if(state)state.update=info;renderUpdate(info);});
+$('install-update').onclick=()=>{if(!updateInfo?.available||!confirm(t('updateConfirm')+updateInfo.latest))return;const version=updateInfo.latest;perform(async()=>{const info=await api('/api/action',{action:'update-start',version});if(state)state.update=info;renderUpdate(info);notice(t('updateReconnect'));watchUpdate();});};
 translate();
 (async()=>{try{csrf=(await api('/api/session')).csrf;signedIn(true);await refresh();}catch{signedIn(false);}})();
-setInterval(()=>{if(csrf&&!busy&&!document.hidden)refresh().catch(error=>notice(error.message,true));},15000);
+setInterval(()=>{if(csrf&&!busy&&!updateTimer&&!document.hidden)refresh().catch(error=>notice(error.message,true));},15000);

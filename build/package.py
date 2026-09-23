@@ -8,6 +8,7 @@ import tarfile
 
 root = Path(__file__).resolve().parent.parent
 names = [
+    "web/updater.py", "web/VERSION", "web/UPDATE_FORMAT",
     "web/server.py", "web/index.html", "web/app.js", "web/style.css",
     "router/install-web.sh", "router/opt/etc/init.d/S101awg3-web",
     "docs/WEB.md", "docs/WEB.en.md",

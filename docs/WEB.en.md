@@ -2,7 +2,7 @@
 
 [Русский](WEB.md) | **English**
 
-The v0.7.0 panel runs **on the router itself** through Entware. A computer or phone only provides the browser. It has its own HTTPS address; it is not a card in Netcraze's built-in Applications page. Includes Russian and English UI.
+The v0.8.0 panel runs **on the router itself** through Entware. A computer or phone only provides the browser. It has its own HTTPS address; it is not a card in Netcraze's built-in Applications page. Includes Russian and English UI.
 
 Features: file/key import, existing-profile replacement, start/stop of the whole VPN service, autostart, watchdog/inbox, handshake timestamps, traffic counters, PingCheck controls and status, filtered log, backup restore and panel password change. Routing and device policies stay in the firmware UI.
 
@@ -10,7 +10,7 @@ Features: file/key import, existing-profile replacement, start/stop of the whole
 
 Requires Entware and Amnezia Netcraze. For a new router, first follow [VPN installation](../INSTALL.en.md); you can then import a profile through the panel. Prior hardware testing is limited to Netcraze Giga NC-1012, hw 1210C000, aarch64, NetcrazeOS 5.1.5, kernel 4.9-ndm-5. The owner confirmed v0.4.1 panel startup on this router; the new PingCheck form has only been tested with simulated firmware.
 
-1. Download `awg3-netcraze-arm64-userspace.tar.gz` from [v0.7.0](https://github.com/Parsefall/amnezia-netcraze/releases/tag/v0.7.0). In PC PowerShell from the download directory:
+1. Download `awg3-netcraze-arm64-userspace.tar.gz` from [v0.8.0](https://github.com/Parsefall/amnezia-netcraze/releases/tag/v0.8.0). In PC PowerShell from the download directory:
 
 ```powershell
 scp -O -P 22 .\awg3-netcraze-arm64-userspace.tar.gz root@192.168.1.1:/opt/tmp/
@@ -21,7 +21,7 @@ ssh -p 22 root@192.168.1.1
 
 ```sh
 opkg update
-opkg install python3-light python3-codecs python3-openssl python3-email python3-urllib python3-logging openssl-util
+opkg install python3-light python3-codecs python3-openssl python3-email python3-urllib python3-logging openssl-util ca-bundle
 mkdir -p /opt/tmp/awg3-v040
 tar -xzf /opt/tmp/awg3-netcraze-arm64-userspace.tar.gz -C /opt/tmp/awg3-v040
 sh /opt/tmp/awg3-v040/awg3-userspace/router/install-web.sh
@@ -122,3 +122,26 @@ Deletion requires confirmation. It stops the selected tunnel, terminates its ver
 Deleted names and indexes remain reserved in `managed.tsv` so stale interface references cannot attach to another VPN. Use a new name for recreation. Index space is 0–99 including reservations; do not edit reservations without checking external references. Every additional userspace tunnel consumes RAM and CPU; a safe tunnel count on NC-1012 has not been measured.
 
 If creation saves a profile but firmware rejects startup, the panel reports the error and retains the profile for editing, retry or deletion. Multi-tunnel operation has been tested against simulated firmware, not yet on physical NC-1012 hardware.
+
+## Updating from the panel (v0.8.0)
+
+Install v0.8.0 once using the existing `router/install-web.sh` procedure. Ensure the router has trusted CA certificates:
+
+```sh
+opkg update
+opkg install ca-bundle
+```
+
+Open **Settings → Application update → Check for updates**. The panel shows the installed version and the latest stable release from `Parsefall/amnezia-netcraze`. Choose **Update** and confirm the selected version. The router downloads and installs the package itself. GitHub is contacted only when checking or installing an update.
+
+Phases: download, archive and file verification, backup, installation, panel restart and HTTPS health check. Tunnel and settings mutations are blocked during updates. After restart the page reloads; sign in with the same password. Profiles, private keys, certificate, password, names, pause/autostart flags and routes are retained. VPN tunnels are not restarted; the watchdog is briefly stopped while its scripts are replaced.
+
+The button updates the panel, importer and control scripts. If packaged `awg`/`amneziawg-go` binaries differ from installed ones or the installation format changes, the update is rejected **before files are replaced** and requires a manual procedure. Downgrades and same-version reinstalls are not supported by the button.
+
+The router needs GitHub HTTPS access, a correct clock, panel dependencies and storage on `/opt` (the initial check requires at least 48 MiB, followed by a backup-space check). Archive sizes are bounded, tar links and unsafe paths are rejected, and SHA256 is verified before installation. Only this project's packaged Releases are downloaded, never arbitrary URLs or scripts from main.
+
+If the replacement panel fails to start or file replacement fails, the updater attempts to restore and start the old version. Backups and logs are under `/opt/etc/awg3/updates/job-*/backup/` and `worker.log`; the update card shows the last result. Downloaded archives and staging files are cleaned up; backups remain.
+
+Power loss/SIGKILL during replacement cannot guarantee automatic rollback. Such interrupted installation blocks further updates until manual recovery. Never remove an active `update.lock` or `service.lock`. For SSH recovery, first verify their recorded PIDs are no longer running, then use `backup/files.json` checksums and the saved files. VPN configuration and `web/settings.json` do not need restoration from an update because the updater never replaces them. Network errors require checking the clock, GitHub connectivity and `ca-bundle`; TLS verification is never disabled.
+
+GitHub metadata fetching, filesystem installation/rollback tests and browser UI have been checked. Updating physical NC-1012 hardware has not yet been tested.

@@ -420,6 +420,7 @@ scan_inbox() (
 # Never steal a lock: after SIGKILL diagnose the PID before removing it manually.
 action=${1:-start}
 case "$action" in status) validate_state && status; exit $?;; esac
+[ ! -d "$RUN/update.lock" ] || { echo "Application update in progress"; exit 1; }
 mkdir "$RUN/service.lock" 2>/dev/null || { echo "Service busy ($RUN/service.lock)"; exit 1; }
 echo "$$" > "$RUN/service.lock/pid"
 trap 'rm -f "$RUN/service.lock/pid"; rmdir "$RUN/service.lock"' EXIT

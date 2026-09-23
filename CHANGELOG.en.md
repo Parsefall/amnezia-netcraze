@@ -2,6 +2,10 @@
 
 [Русский](CHANGELOG.md) | **English**
 
+## 0.8.0
+
+GitHub release checking and updates from panel settings. Detached worker, SHA256/archive verification, backup, startup health check and rollback on failure. Keys and settings are retained; VPN binaries are not replaced and binary changes require manual updating. Bootstrap this version with the existing installer.
+
 ## 0.7.0
 
 Minimal overview, Tunnels tab with per-tunnel settings, separate log. Multiple concurrent VPNs with independent start/pause/delete and scoped key/PingCheck controls. Startup and repair respect pause; duplicate client keys are rejected. Deletion saves a backup and reserves the old index. Physical hardware validation remains pending.

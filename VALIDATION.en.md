@@ -66,3 +66,7 @@ Panel v0.5.0: 42 Python tests (16 converter, 14 HTTPS/API, 12 PingCheck). Edge a
 ## v0.7.0
 
 48 Python tests; service regressions cover a third tunnel, unchanged neighbours, duplicate-key rejection, pause during import/startup, retryable deletion failures, reserved deleted indexes and independent startup after global stop. Edge: minimal overview, scoped replacement, second-tunnel creation, PingCheck, pause/start/delete, RU/EN and mobile layout. Firmware is simulated; real concurrent tunnels on NC-1012 have not been verified.
+
+## v0.8.0
+
+69 Python tests, including 18 updater tests and 3 new HTTPS/API checks. Covers unsafe tar paths/links/duplicates, checksums, versions, changed-engine rejection, disk space, locks, key preservation, successful install, partial-write rollback, rollback failure and interruption. Browser: versions, checking, confirm/cancel, pinned version request, RU/EN and mobile layout. Installation tests use a temporary filesystem and mocked services; hardware updating remains untested.

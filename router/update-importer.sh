@@ -6,6 +6,7 @@ PATH=/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 BASE=/opt/etc/awg3
 RUN=/var/run/awg3
+[ ! -d "$RUN/update.lock" ] || { echo "ERROR: panel update in progress"; exit 1; }
 [ "$(id -u)" = 0 ] || { echo 'ERROR: root required'; exit 1; }
 [ -x /opt/etc/init.d/S99awg3 ] || { echo 'ERROR: install the router package first'; exit 1; }
 /opt/bin/python3 -c 'import sys, argparse, base64, getpass, ipaddress, json, pathlib, zlib; assert sys.version_info >= (3,10)' || { echo 'ERROR: install Entware python3-light and python3-codecs'; exit 1; }

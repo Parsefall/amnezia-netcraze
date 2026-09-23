@@ -9,6 +9,7 @@ import hmac
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import ipaddress
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -21,6 +22,11 @@ import subprocess
 import tempfile
 import threading
 import time
+
+_update_spec = importlib.util.spec_from_file_location('awg3_updates', Path(__file__).with_name('updater.py'))
+updates = importlib.util.module_from_spec(_update_spec)
+_update_spec.loader.exec_module(updates)
+APP_VERSION = Path(__file__).with_name('VERSION').read_text().strip()
 
 BASE = Path('/opt/etc/awg3')
 SERVICE = '/opt/etc/init.d/S99awg3'
@@ -126,6 +132,7 @@ class Application:
     def __init__(self, settings, base=BASE, runner=command, runpath=Path("/var/run/awg3")):
         self.settings, self.base, self.runner = settings, Path(base), runner
         self.runpath = Path(runpath)
+        self.updater = updates.Manager(self.base, self.runpath, Path(__file__).parent)
         self.network = validate_network(settings['bind'], settings['network'], settings['port'])
         self.authority = settings['bind'] + ':' + str(settings['port'])
         self.origin = 'https://' + self.authority
@@ -220,7 +227,7 @@ class Application:
                 'enabled': (self.base/'enabled').exists(),
                 'watchdog': (self.base/'watchdog-enabled').exists(),
                 'pingcheck': clean_diagnostic(ping) if rc == 0 else 'PingCheck unavailable',
-                'busy': self.operation.locked()}
+                'busy': self.operation.locked(), 'update': self.updater.status()}
 
     def ndmc(self, text):
         rc, output = self.runner(['ndmc', '-c', text], 12)
@@ -329,6 +336,9 @@ class Application:
         if not self.operation.acquire(blocking=False): raise PanelError(409, 'Another operation is running.')
         try:
             action = body.get('action')
+            if action == 'update-check': return self.updater.check()
+            if action == 'update-start': return self.updater.start(body.get('version'))
+            if (self.runpath/'update.lock').exists(): raise PanelError(409, 'update_busy')
             if action in ('pingcheck-apply', 'pingcheck-disable', 'pingcheck-save'):
                 return self.pingcheck_action(body)
             if action in ('up','stop','enable','disable'):
@@ -371,6 +381,8 @@ class Application:
                     return self.run_action([SERVICE, action, str(path), name])
             else: raise PanelError(400, 'Unknown action.')
             return self.run_action(args)
+        except updates.UpdateError as error:
+            raise PanelError(400, str(error)) from None
         finally:
             self.operation.release()
 
@@ -382,6 +394,7 @@ class Application:
         return {'message': clean_diagnostic(output)[-1200:] or 'Done. Verify tunnel connectivity.'}
 
     def change_password(self, body):
+        if (self.runpath/'update.lock').exists(): raise PanelError(409, 'update_busy')
         with self.auth_lock:
             if not password_matches(body.get('current'), self.settings['password']):
                 raise PanelError(401, 'Incorrect current password.')
@@ -405,6 +418,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Type', content_type)
         self.send_header('Content-Length', str(len(data)))
         self.send_header('Cache-Control', 'no-store')
+        self.send_header('X-App-Version', APP_VERSION)
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('Referrer-Policy', 'no-referrer')
         self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'none'")
@@ -435,6 +449,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, (self.server.assets/file).read_bytes(), mime)
             _, csrf = self.app.session(self.headers.get('Cookie'))
             if self.path == '/api/session': return self.reply(200, {'csrf': csrf})
+            if self.path == '/api/update/status': return self.reply(200, self.app.updater.status())
             if self.path == '/api/status': return self.reply(200, self.app.status())
             if self.path == '/api/log':
                 path = self.app.base.parent.parent/'var/log/awg3.log'
@@ -446,7 +461,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, {'log': clean_diagnostic(text)})
             raise PanelError(404, 'Not found.')
         except PanelError as e: self.reply(e.code, {'error': e.message})
-        except (OSError, ValueError): self.reply(503, {'error': 'Unable to read router state.'})
+        except (OSError, ValueError, updates.UpdateError): self.reply(503, {'error': 'Unable to read router state.'})
 
     def do_POST(self):
         try:

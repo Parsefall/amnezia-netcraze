@@ -36,3 +36,7 @@ CI runs shell tests and packaging on Ubuntu; it does not emulate NDMS.
 `python build/package.py` creates outputs/awg3-netcraze-arm64-userspace.tar.gz, an external .sha256, and internal SHA256SUMS. Only allowlisted files are included, without keys, personal profiles, logs, or .ko files.
 
 The first release was published from a clean snapshot without the original workspace history. Review staged changes and the archive before every release. A hash from the same release checks integrity but is not an independent digital signature.
+
+## Web update format
+
+Release version lives in `web/VERSION` and the HTML footer; the GitHub tag is `v` plus that version. `web/UPDATE_FORMAT` is `1`. Installed files are fixed in `web/updater.py:FILES`; bump the format when changing the layout or adding required files so older updaters reject incompatible releases. VPN binary changes always require manual installation. Publish both archive and `.sha256`; package VERSION must match the release tag.

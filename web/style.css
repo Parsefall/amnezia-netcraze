@@ -3,3 +3,5 @@
 .status-off{color:var(--muted)}
 
 .tunnel-heading{display:flex;justify-content:space-between;align-items:center;gap:12px}.tunnel-heading h2{margin:0}.gear{font-size:22px;padding:4px 12px}.minimal-tunnel{display:flex;align-items:center;justify-content:space-between;gap:16px}.minimal-tunnel h2{margin:0;overflow-wrap:anywhere}#tunnel-editor{margin-top:32px}#tunnel-editor>.card,#profile-settings,#ping-settings{margin-bottom:20px}.danger-zone{border-color:#805353}button:disabled{cursor:not-allowed}
+
+#settings>.card,#settings>.grid{margin-bottom:20px}.update-card a{color:var(--accent);align-self:center}#update-progress{overflow-wrap:anywhere}

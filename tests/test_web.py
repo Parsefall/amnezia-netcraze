@@ -151,6 +151,24 @@ class PanelTests(unittest.TestCase):
         (self.base/'conf/router.conf').unlink()
         data=json.loads(self.request('GET','/api/status')[2])
         self.assertEqual([x['profile'] for x in data['tunnels']],['second'])
+    def test_update_endpoints_require_auth_and_csrf(self):
+        self.assertEqual(self.request('GET','/api/update/status')[0],401)
+        self.assertEqual(self.request('POST','/api/action',{'action':'update-start','version':'v9.0.0'})[0],401)
+        self.login()
+        self.assertEqual(self.request('POST','/api/action',{'action':'update-check'},{'X-CSRF-Token':'bad'})[0],403)
+        response=self.request('GET','/api/update/status')
+        self.assertEqual(response[0],200);self.assertEqual(json.loads(response[2])['current'],w.APP_VERSION)
+        self.assertEqual(response[1]['X-App-Version'],w.APP_VERSION)
+    def test_update_lock_blocks_mutations(self):
+        self.login();(self.app.runpath/'update.lock').mkdir(parents=True)
+        for action in ['stop','rename','delete','import']:
+            self.assertEqual(self.request('POST','/api/action',{'action':action})[0],409)
+        self.assertEqual(self.request('POST','/api/password',{'current':PASSWORD,'password':'another-panel-password'})[0],409)
+        self.assertEqual(self.calls,[])
+    def test_update_check_and_selection(self):
+        self.login();self.app.updater.check=lambda:{'latest':'v9.0.0','available':True}
+        self.assertEqual(json.loads(self.request('POST','/api/action',{'action':'update-check'})[2])['latest'],'v9.0.0')
+        self.assertEqual(self.request('POST','/api/action',{'action':'update-start','version':'v9.0.0; reboot'})[0],400)
     def test_failure_redaction(self):
         self.login();self.fail_action=True
         status,_,raw=self.request('POST','/api/action',{'action':'stop'})
