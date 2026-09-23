@@ -6,7 +6,7 @@ Manage AmneziaWG in a browser: upload a `.vpn`/`.txt` export or paste a full cli
 
 AmneziaWG 3.1 for Netcraze through Entware: a ready-to-install ARM64 package, a userspace engine, and integration with the router's routing policies. No `amneziawg.ko` kernel module is required.
 
-**Tested only on the project owner's Netcraze Giga NC-1012:** hardware revision **1210C000**, ARM64 (`aarch64`), firmware **5.1.5 / 5.01.C.5.0-0**, Linux **4.9-ndm-5**, Entware on external storage, and `/dev/net/tun`. Compatibility with other models or firmware versions is not claimed.
+**Tested ONLY on the project owner's Netcraze Giga NC-1012:** hardware revision **1210C000**, ARM64 (`aarch64`), firmware **5.1.5 / 5.01.C.5.0-0**, Linux **4.9-ndm-5**, Entware on external storage, and `/dev/net/tun`. Compatibility with other models or firmware versions is not claimed.
 
 ## Download and install
 
@@ -18,11 +18,15 @@ AmneziaWG 3.1 for Netcraze through Entware: a ready-to-install ARM64 package, a 
 
 The installer checks file hashes, backs up replaced files, and **does not start the VPN, import keys, or change connection priorities**. Starting the VPN does not add a default route either: routing is an explicit user decision.
 
-## What has been verified
+## System requirements
 
-Engine startup, handshakes, traffic, engine autostart after reboot and web panel startup have been confirmed on the device above.
-
-The built-in Ping Check is bound to OpkgTun0 and successfully probes the tunnel. **Actual outage failover and recovery have not been tested.** Final release script changes passed local tests but have not been reinstalled on the test router. See [VALIDATION.en.md](VALIDATION.en.md).
+- A router with 64-bit ARM (`aarch64`), Entware at `/opt` and root access to its SSH shell.
+- TUN device `/dev/net/tun`, `ndmc` and firmware support for `OpkgTun` interfaces; the Ping Check component for connectivity monitoring.
+- Compatible system libraries for `awg`: `/lib/ld-musl-aarch64.so.1`, libc and libgcc. This package does not support MIPS/MIPSEL or 32-bit ARM.
+- Python **3.10 or newer**, Python packages required by the HTTPS panel, `openssl-util` and `ca-bundle`. Dependency installation commands are in the [installation guide](INSTALL.en.md).
+- Storage for the application, dependencies and backups. Panel updates require at least **48 MiB free before downloading**; backup space is checked separately.
+- Available RAM for the VPN engine and panel. The tested router has **512 MiB RAM**; this is its hardware specification, not an established minimum. Memory usage grows with the number of tunnels.
+- A JavaScript-enabled browser with access to the router's LAN.
 
 ## Limitations
 
@@ -37,7 +41,7 @@ The built-in Ping Check is bound to OpkgTun0 and successfully probes the tunnel.
 - [Routes and policies](docs/ROUTING.en.md)
 - [Availability monitoring and failover](docs/HEALTHCHECK.en.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.en.md)
-- [Architecture](ARCHITECTURE.en.md), [building](docs/BUILD.en.md), [validation](VALIDATION.en.md)
+- [Architecture](ARCHITECTURE.en.md), [building](docs/BUILD.en.md)
 - [Changelog](CHANGELOG.en.md), [provenance and licenses](NOTICE.en.md)
 
 The engine is official [amneziawg-go](https://github.com/amnezia-vpn/amneziawg-go) with a local S4 race fix. This is an independent project, not an official Netcraze or Amnezia product.
