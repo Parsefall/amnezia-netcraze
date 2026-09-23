@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.1
+
+Fixed router import of profiles containing a DNS hostname, URL or empty value: unused DNS is discarded before IP validation, retaining firmware DNS settings. Address and AllowedIPs errors now identify the field.
+
 [Русский](CHANGELOG.md) | **English**
 
 ## 0.8.0

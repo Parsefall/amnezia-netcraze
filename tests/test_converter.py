@@ -154,6 +154,24 @@ class RouterNormalization(unittest.TestCase):
         self.assertEqual(text.count('MTU = 1280'), 1)
         self.assertIn('PrivateKey = ' + KEY1, text)
 
+    def test_router_cli_ignores_unused_dns(self):
+        for dns in ('dns.example.com', '1.1.1.1, search.example', 'https://dns.example/dns-query', ''):
+            with self.subTest(dns=dns), tempfile.TemporaryDirectory() as temp:
+                inp=Path(temp)/'in.vpn';out=Path(temp)/'router.conf'
+                inp.write_bytes(url(export(NATIVE.replace('DNS = 1.1.1.1','DNS = '+dns))))
+                result=subprocess.run([sys.executable,str(ROOT/'tools/convert_profile.py'),'--input',str(inp),'--output',str(out),'--ipv4-only','--router-import'],capture_output=True,text=True)
+                self.assertEqual(result.returncode,0,result.stderr)
+                self.assertNotIn('DNS =',out.read_text())
+                self.assertIn('PrivateKey = '+KEY1,out.read_text())
+
+    def test_ignored_dns_does_not_relax_other_validation(self):
+        for source,field in [('Address = 10.0.0.2/32','Address'),('AllowedIPs = 0.0.0.0/0','AllowedIPs')]:
+            with self.assertRaises(c.ConversionError) as raised:
+                c.convert(NATIVE.replace(source,field+' = invalid').encode(),ignore_dns=True)
+            self.assertIn(field,str(raised.exception))
+        for native in (NATIVE.replace('DNS = 1.1.1.1','DNS = name\nDNS = duplicate'),NATIVE+'PostUp = reboot\n'):
+            with self.assertRaises(c.ConversionError):c.convert(native.encode(),ignore_dns=True)
+
     def test_explicit_mtu_preserved(self):
         self.assertIn('MTU = 1380', c.router_profile(NATIVE.replace('1280', '1380')))
 

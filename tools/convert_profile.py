@@ -134,7 +134,7 @@ def validate_key(value):
         raise ConversionError('A cryptographic key is not a valid 32-byte Base64 value.')
 
 
-def prepare_native(text, ipv4_only=False):
+def prepare_native(text, ipv4_only=False, ignore_dns=False):
     sections = {'Interface': {}, 'Peer': {}}
     current = None
     seen = set()
@@ -156,7 +156,7 @@ def prepare_native(text, ipv4_only=False):
         key, value = key.strip(), value.strip()
         if key == 'PreSharedKey':
             key = 'PresharedKey'
-        if current is None or not separator or not value:
+        if current is None or not separator or (not value and not (ignore_dns and current == 'Interface' and key == 'DNS')):
             raise ConversionError('Malformed or empty profile setting.')
         allowed = INTERFACE if current == 'Interface' else PEER
         if key not in allowed or key in sections[current]:
@@ -165,6 +165,8 @@ def prepare_native(text, ipv4_only=False):
     for section, required in [('Interface', ('PrivateKey', 'Address')), ('Peer', ('PublicKey', 'AllowedIPs', 'Endpoint'))]:
         if any(k not in sections[section] for k in required):
             raise ConversionError('The profile is missing required client connection fields.')
+    if ignore_dns:
+        sections['Interface'].pop('DNS', None)
     removed = 0
     for section, key, parser in [('Interface', 'Address', ipaddress.ip_interface), ('Interface', 'DNS', ipaddress.ip_address), ('Peer', 'AllowedIPs', ipaddress.ip_network)]:
         fields = sections[section]
@@ -173,7 +175,7 @@ def prepare_native(text, ipv4_only=False):
         try:
             values = [parser(v.strip()) for v in fields[key].split(',')]
         except ValueError:
-            raise ConversionError('Invalid Address, DNS, or AllowedIPs. DNS must contain IP addresses.') from None
+            raise ConversionError('Invalid '+key+'. Expected IP addresses or networks in the supported format.') from None
         v4 = [v for v in values if v.version == 4]
         if len(v4) != len(values) and not ipv4_only:
             raise ConversionError('IPv6 is present. Select IPv4-only conversion for this router wrapper.')
@@ -202,8 +204,8 @@ def prepare_native(text, ipv4_only=False):
     return result, removed
 
 
-def convert(data, ipv4_only=False, profile_index=None):
-    return prepare_native(extract_profile(decode_export(data), profile_index), ipv4_only)
+def convert(data, ipv4_only=False, profile_index=None, ignore_dns=False):
+    return prepare_native(extract_profile(decode_export(data), profile_index), ipv4_only, ignore_dns)
 
 
 def router_profile(text):
@@ -260,7 +262,7 @@ def main():
             data = getpass.getpass('Paste vpn:// key (hidden): ').encode('utf-8')
         else:
             data = read_input(args.input)
-        text, removed = convert(data, args.ipv4_only, args.profile_index)
+        text, removed = convert(data, args.ipv4_only, args.profile_index, ignore_dns=args.router_import)
         if args.router_import:
             text = router_profile(text)
         save_private(args.output, text)
