@@ -101,6 +101,27 @@ def clean_diagnostic(text):
     return '\n'.join(lines)
 
 
+def ping_states(output):
+    """Associate status only with its interface, never an ISP's pass result."""
+    result, iface, block_indent = {}, None, None
+    for line in output.splitlines():
+        text = line.strip()
+        indent = len(line)-len(line.lstrip())
+        if text in ('pingcheck:', 'interface:'):
+            iface, block_indent = None, None
+        match = re.fullmatch(r'name: (OpkgTun(?:0|[1-9][0-9]?))', text)
+        if match:
+            iface, block_indent = match[1], indent
+        elif iface and text.startswith('status:'):
+            value = text.split(':',1)[1].strip()
+            result[iface] = value if value in ('pass', 'fail') else 'unknown'
+            iface = None
+        elif iface and text and indent < block_indent and not re.match(r'(ignore-fail|successcount|failcount):', text):
+            # CLI key alignment varies; only section boundaries invalidate above.
+            if text.endswith(':'): iface = None
+    return result
+
+
 class Application:
     def __init__(self, settings, base=BASE, runner=command, runpath=Path("/var/run/awg3")):
         self.settings, self.base, self.runner = settings, Path(base), runner
@@ -177,7 +198,17 @@ class Application:
             if NAME.fullmatch(name) and re.fullmatch(r'[A-Za-z0-9]{6}', suffix) and not path.is_symlink() and path.is_file():
                 backups.append({'id': path.name, 'profile': name, 'time': int(path.stat().st_mtime)})
         rc, ping = self.runner(['ndmc', '-c', 'show ping-check'], 8)
-        return {'running': (self.runpath/'running').exists(), 'profiles': self.profiles(), 'tunnels': tunnels, 'backups': backups,
+        checks = ping_states(ping) if rc == 0 else {}
+        started = (self.runpath/'running').exists()
+        for tunnel in tunnels:
+            check = checks.get(tunnel['interface'], 'unknown')
+            tunnel['connection'] = ('disconnected' if not started or not tunnel['engine'] or check == 'fail'
+                                    else 'connected' if check == 'pass' else 'unverified')
+            label = self.base/'names'/tunnel['profile']
+            text = label.read_text().strip() if label.is_file() and not label.is_symlink() else ''
+            tunnel['name'] = text if re.fullmatch(r'[A-Za-z0-9_. -]{1,64}', text) else tunnel['profile']
+        active = started and any(tunnel['engine'] for tunnel in tunnels)
+        return {'running': active, 'started': started, 'profiles': self.profiles(), 'tunnels': tunnels, 'backups': backups,
                 'enabled': (self.base/'enabled').exists(),
                 'watchdog': (self.base/'watchdog-enabled').exists(),
                 'pingcheck': clean_diagnostic(ping) if rc == 0 else 'PingCheck unavailable',
@@ -294,6 +325,13 @@ class Application:
                 return self.pingcheck_action(body)
             if action in ('up','stop','enable','disable'):
                 args = [SERVICE, action]
+            elif action == 'rename':
+                name, label = body.get('name'), body.get('label')
+                if (not isinstance(name, str) or name not in self.profiles()
+                        or not isinstance(label, str) or label != label.strip()
+                        or not re.fullmatch(r'[A-Za-z0-9_. -]{1,64}', label)):
+                    raise PanelError(400, 'Use 1–64 Latin letters, digits, spaces, dot, dash or underscore.')
+                args = [SERVICE, 'rename', name, label]
             elif action in ('watchdog-enable','watchdog-disable'):
                 args = [WATCHDOG, action.split('-')[1]]
             elif action == 'restore':

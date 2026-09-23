@@ -158,6 +158,28 @@ test ! -f "$RUN/running"
 start_service >/dev/null
 ! grep -q 'ip global auto' "$TMP/calls"
 
+# Display name persists across startup without changing profile mapping.
+rename_tunnel b 'My VPN' >/dev/null
+test "$(display_name b)" = 'My VPN'
+: > "$TMP/calls"
+start_service >/dev/null
+grep -Fq 'description "My VPN"' "$TMP/calls"
+if rename_tunnel b 'bad;name' >/dev/null; then exit 1; fi
+test "$(display_name b)" = 'My VPN'
+# Rejection must not commit a new display name.
+touch "$TMP/reject-ndms"
+if rename_tunnel b 'Rejected' >/dev/null; then exit 1; fi
+rm "$TMP/reject-ndms"
+test "$(display_name b)" = 'My VPN'
+# Exercise the real disable dispatcher in the redirected script.
+: > "$BASE/enabled"
+: > "$TMP/calls"
+sed '/^action=/,$!d' "$ROOT/router/opt/etc/init.d/S99awg3" > "$TMP/dispatch.sh"
+(sh -c '. "$1"; dispatch=$2; set -- disable; . "$dispatch"' sh "$TMP/lib.sh" "$TMP/dispatch.sh") >/dev/null
+test ! -f "$BASE/enabled"
+test -f "$RUN/running"
+test ! -s "$TMP/calls"
+
 # Removed source retains reserved ownership and never triggers broad cleanup.
 rm "$CONF/a.conf"
 start_service >/dev/null

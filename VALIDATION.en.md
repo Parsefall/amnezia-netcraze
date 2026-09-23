@@ -58,3 +58,7 @@ Not verified: IPv6, every combination of AWG parameters, long-term stability, th
 ## v0.5.0
 
 Panel v0.5.0: 42 Python tests (16 converter, 14 HTTPS/API, 12 PingCheck). Edge against simulated firmware: apply, disable, save, interface selection, edited values retained on refresh, RU/EN and 390 px mobile layout. The owner confirmed v0.4.1 startup on NC-1012. The new form and actual VPN outage have not been tested on hardware.
+
+## v0.6.0
+
+45 Python tests; service regressions cover rename, persistence on startup, NDMS rejection retaining the old name and autostart disable without stopping. Edge checks cover status, button states, independent autostart, rename, RU/EN and mobile width. Firmware is simulated; new features have not been tested on physical hardware.

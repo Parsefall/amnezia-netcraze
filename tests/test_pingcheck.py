@@ -27,6 +27,48 @@ class PingTests(unittest.TestCase):
         if cmd == 'show running-config': return 0, self.config
         if self.fail and self.fail(cmd): return 0, 'Command::Base error[7405602]: argument parse error.'
         return 0, 'OK'
+    def test_interface_scoped_status(self):
+        output = """    pingcheck:
+          profile: default
+        interface:
+                 name: ISP
+               status: pass
+    pingcheck:
+          profile: AWG3Check
+        interface:
+                 name: OpkgTun0
+          ignore-fail: no
+         successcount: 0
+            failcount: 3
+               status: fail
+        interface:
+                 name: OpkgTun1
+               status: pass
+"""
+        self.assertEqual(w.ping_states(output), {'OpkgTun0':'fail', 'OpkgTun1':'pass'})
+        self.assertEqual(w.ping_states('profile: AWG3Check\nstatus: pass'), {})
+    def test_connection_and_saved_display_name(self):
+        original = self.app.runner
+        def runner(args, timeout=75):
+            if args[0] == w.AWG: return 0, 'key 123 456'
+            if args[-1] == 'show ping-check': return 0, 'interface:\n name: OpkgTun0\n status: pass'
+            return original(args,timeout)
+        self.app.runner=runner
+        (self.base/'names').mkdir();(self.base/'names/pars').write_text('My VPN')
+        self.app.runpath.mkdir();(self.app.runpath/'running').touch()
+        status=self.app.status()
+        self.assertTrue(status['running'])
+        self.assertEqual(status['tunnels'][0]['name'],'My VPN')
+        self.assertEqual(status['tunnels'][0]['connection'],'connected')
+        (self.app.runpath/'running').unlink()
+        self.assertFalse(self.app.status()['running'])
+        self.assertEqual(self.app.status()['tunnels'][0]['connection'],'disconnected')
+        self.app.runner=lambda args, timeout=75: (1, '')
+        self.assertEqual(self.app.status()['tunnels'][0]['connection'],'disconnected')
+    def test_rename_validation(self):
+        for label in ['bad"name', '../escape', 'x;reboot', '', 'x\nup']:
+            with self.assertRaises(w.PanelError): self.app.execute({'action':'rename','name':'pars','label':label})
+        self.assertEqual(self.calls, [])
     def test_apply_preserves_shared_profile_and_does_not_save(self):
         result = self.app.execute(self.body)
         created = self.calls[1].split()[-1]

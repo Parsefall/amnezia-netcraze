@@ -2,6 +2,10 @@
 
 [Русский](CHANGELOG.md) | **English**
 
+## 0.6.0
+
+PingCheck-based connection status, state-aware buttons, independent autostart disable and persistent tunnel display names. Removed two overview captions. Uninstall now explicitly stops VPN. Firmware interface type is unchanged.
+
 ## 0.5.0
 
 Panel PingCheck controls: IPv4 target, intervals and thresholds, enable/disable, explicit full-router configuration save. Isolated profiles, import locking, assignment rollback on failure, RU/EN. 12 simulated-firmware tests; actual outage failover remains untested.

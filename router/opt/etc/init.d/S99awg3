@@ -107,6 +107,38 @@ ensure_engine() (
 parse_profile() (
     "$SPLIT" "$1" "opkgtun$2" "OpkgTun$2"
 )
+display_name() (
+    name=$1
+    label=$name
+    if [ -f "$BASE/names/$name" ] && [ ! -L "$BASE/names/$name" ]; then
+        candidate=$(cat "$BASE/names/$name")
+        case "$candidate" in ''|*[!A-Za-z0-9_.\ -]*) ;; *) [ "${#candidate}" -le 64 ] && label=$candidate;; esac
+    fi
+    printf '%s\n' "$label"
+)
+rename_tunnel() (
+    name=$1; label=$2
+    valid_source "$CONF/$name.conf" && [ -f "$CONF/$name.conf" ] || exit 1
+    case "$label" in ''|*[!A-Za-z0-9_.\ -]*) log 'Name: use Latin letters, digits, spaces, dot, dash or underscore'; exit 1;; esac
+    [ "${#label}" -le 64 ] || exit 1
+    idx=$(awk -F '\t' -v s="$CONF/$name.conf" '$1==s {print $2}' "$STATE")
+    valid_index "$idx" && ndms_owned_type "OpkgTun$idx" || exit 1
+    mkdir -p "$BASE/names" || exit 1
+    chmod 700 "$BASE/names"
+    tmp=$(mktemp "$BASE/names/.rename.XXXXXX") || exit 1
+    trap 'rm -f "$tmp"' EXIT
+    printf '%s\n' "$label" > "$tmp" || exit 1
+    old=$(display_name "$name")
+    if ! ndms_cmd "interface OpkgTun$idx description \"$label\""; then
+        ndms_cmd "interface OpkgTun$idx description \"$old\"" || log 'ERROR: name rollback failed'
+        exit 1
+    fi
+    if ! mv -f "$tmp" "$BASE/names/$name"; then
+        ndms_cmd "interface OpkgTun$idx description \"$old\"" || log 'ERROR: name rollback failed'
+        exit 1
+    fi
+    log "Display name saved for OpkgTun$idx; profile filename unchanged"
+)
 configure() (
     src=$1; idx=$2; iface=opkgtun$idx; ndms=OpkgTun$idx
     # Parse before modifying any existing interface.
@@ -122,7 +154,8 @@ configure() (
     # Values never reach a shell; parser emits validated NDMS settings only.
     "$AWG" setconf "$iface" "$PARSED/$iface.awg.conf" >/dev/null 2>&1 || { log "ERROR: awg rejected $src"; exit 1; }
     name=${src##*/}; name=${name%.conf}
-    ndms_cmd "interface $ndms description $name" || exit 1
+    label=$(display_name "$name")
+    ndms_cmd "interface $ndms description \"$label\"" || exit 1
     if [ "$existing" -eq 1 ]; then
         sed '/^ndmc -c "interface .* ip global auto"/d' "$PARSED/$iface.ndms.sh" > "$PARSED/$iface.existing.sh" || exit 1
         settings=$PARSED/$iface.existing.sh
@@ -300,7 +333,8 @@ case "$action" in
     inbox) scan_inbox;;
     repair) repair "${2:-}";;
     enable) : > "$BASE/enabled"; echo 'Autostart enabled (does not start VPN)';;
-    disable) rm -f "$BASE/enabled"; stop_service;;
+    disable) rm -f "$BASE/enabled"; echo "Autostart disabled (VPN state unchanged)";;
+    rename) [ "$#" -eq 3 ] || exit 1; rename_tunnel "$2" "$3";;
     save) ndms_cmd 'system configuration save';;
-    *) echo "Usage: $0 {up|start|stop|restart|status|repair N|import FILE NAME|inbox|enable|disable|save}"; exit 1;;
+    *) echo "Usage: $0 {up|start|stop|restart|status|repair N|import FILE NAME|inbox|enable|disable|rename NAME LABEL|save}"; exit 1;;
 esac

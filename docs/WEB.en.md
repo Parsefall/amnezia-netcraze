@@ -2,7 +2,7 @@
 
 [Русский](WEB.md) | **English**
 
-The v0.5.0 panel runs **on the router itself** through Entware. A computer or phone only provides the browser. It has its own HTTPS address; it is not a card in Netcraze's built-in Applications page. Includes Russian and English UI.
+The v0.6.0 panel runs **on the router itself** through Entware. A computer or phone only provides the browser. It has its own HTTPS address; it is not a card in Netcraze's built-in Applications page. Includes Russian and English UI.
 
 Features: file/key import, existing-profile replacement, start/stop of the whole VPN service, autostart, watchdog/inbox, handshake timestamps, traffic counters, PingCheck controls and status, filtered log, backup restore and panel password change. Routing and device policies stay in the firmware UI.
 
@@ -10,7 +10,7 @@ Features: file/key import, existing-profile replacement, start/stop of the whole
 
 Requires Entware and Amnezia Netcraze. For a new router, first follow [VPN installation](../INSTALL.en.md); you can then import a profile through the panel. Prior hardware testing is limited to Netcraze Giga NC-1012, hw 1210C000, aarch64, NetcrazeOS 5.1.5, kernel 4.9-ndm-5. The owner confirmed v0.4.1 panel startup on this router; the new PingCheck form has only been tested with simulated firmware.
 
-1. Download `awg3-netcraze-arm64-userspace.tar.gz` from [v0.5.0](https://github.com/Parsefall/amnezia-netcraze/releases/tag/v0.5.0). In PC PowerShell from the download directory:
+1. Download `awg3-netcraze-arm64-userspace.tar.gz` from [v0.6.0](https://github.com/Parsefall/amnezia-netcraze/releases/tag/v0.6.0). In PC PowerShell from the download directory:
 
 ```powershell
 scp -O -P 22 .\awg3-netcraze-arm64-userspace.tar.gz root@192.168.1.1:/opt/tmp/
@@ -53,7 +53,7 @@ Keep this a home-LAN service: do not expose it using port forwarding or a public
 - Profiles: use the existing basename **without .conf** (`pars` for `pars.conf`), select one file or paste a key, then Validate and apply. Unknown targets are rejected while VPN runs; new profiles can be imported when stopped.
 - Import keeps the same OpkgTun, routes, policies and priority. See [router import](ROUTER-IMPORT.en.md) for format/rollback limitations. Export DNS is omitted, IPv6 removed, absent MTU defaults to 1280.
 - Verify a fresh handshake, PingCheck and traffic after server migration. An available engine does not prove VPN connectivity. Update any manual exception route for the old Endpoint separately.
-- Start/stop controls the **whole service**. Disable and stop VPN removes autostart and stops VPN.
+- Start/stop controls the **whole service**. Disable under autostart only removes autostart.
 - Restore applies a backup to its original profile. Private profiles/backups cannot be downloaded through the panel.
 - Log viewing filters key-related lines and long secret-like strings. It is diagnostic output, not a complete log export; review before sharing.
 - Panel autostart is separate; stopping VPN keeps the panel available. Sessions last one hour; changing the password invalidates all sessions.
@@ -89,7 +89,7 @@ The browser polls every 15 seconds only while visible. No CDN, analytics or remo
 
 Dependencies, password and certificate setup do not need repeating. Replace only `/opt/etc/init.d/S101awg3-web` with the 0.4.1 file, chmod 755 and enable it using the full path. Startup now uses shell builtins; nohup is not required. Router logs confirmed this issue on NC-1012; corrected hardware startup is awaiting confirmation.
 
-## PingCheck in the panel (v0.5.0)
+## PingCheck in the panel (v0.6.0)
 
 Open **Diagnostics → PingCheck**, select a VPN interface and choose **Enable / apply**. Recommended values: `1.1.1.1`, 10-second interval, 3-second timeout, 3 failures, 2 successes. The fields are a new-settings template; current firmware output appears above them. Automatic refresh preserves edited fields.
 
@@ -98,3 +98,11 @@ Checks run in firmware using ICMP, without restarting the interface. The panel c
 After applying, wait for `status: pass`. Choose **Save router configuration** to retain changes after reboot. This saves the **entire current firmware configuration**, including other unsaved changes. Apply alone only updates the running configuration.
 
 Failure and rollback paths are tested against simulated firmware. The new form and actual outage failover have not yet been verified on hardware. `pass` does not prove fallback works; policies and routes also matter. These CLI commands and a `pass` state were previously checked on Netcraze Giga NC-1012, NetcrazeOS 5.1.5.
+
+## Controls and names (v0.6.0)
+
+Service controls start or stop the whole VPN service. Tunnel cards show individual profiles. Start and stop buttons are disabled when the corresponding action is unnecessary. Disabling autostart does not stop VPN; use Stop separately.
+
+Connected means the service is started, the engine responds and that interface's PingCheck reports `pass`. Disconnected means the service is stopped, the engine is unavailable or PingCheck reports `fail`. Missing results show Connection not verified. The panel refreshes every 15 seconds in addition to the check's own delay. A successful check of one address does not guarantee access to all websites.
+
+Rename changes the display name in the panel and the Netcraze interface description. Names allow 1–64 Latin letters, digits, spaces, dots, dashes or underscores. The profile filename and OpkgTun identifier remain unchanged; keep using the original filename for imports. Names are stored in `/opt/etc/awg3/names/` and reapplied at service startup. The native `connection-type.OpkgTun` type label is unchanged.

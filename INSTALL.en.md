@@ -142,4 +142,6 @@ Ping Check is saved in NDMS independently of the package. The optional UAPI watc
 
 ## Removal and rollback
 
-Return clients to the ISP policy, disable your VPN routes, and run `/opt/etc/init.d/S99awg3 disable`. You can run `sh router/uninstall.sh` from the extracted archive; it preserves profiles, binaries, backups, and NDMS objects. This is not a complete network rollback. Disable autostart and reboot before restoring files from backup. Do not restore the incompatible `amneziawg.ko` kernel module.
+Return clients to the ISP policy, disable your VPN routes, and run `/opt/etc/init.d/S99awg3 disable`, then `/opt/etc/init.d/S99awg3 stop`. You can run `sh router/uninstall.sh` from the extracted archive; it preserves profiles, binaries, backups, and NDMS objects. This is not a complete network rollback. Disable autostart and reboot before restoring files from backup. Do not restore the incompatible `amneziawg.ko` kernel module.
+
+Since v0.6.0, `disable` only disables autostart; run `stop` separately to stop VPN.
