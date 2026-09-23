@@ -2,146 +2,105 @@
 
 [Русский](INSTALL.md) | **English**
 
-An optional [web panel runs on the router](docs/WEB.en.md): import files/keys, control VPN, view status and restore backups in a browser.
+The main installation flow is to install the VPN engine and web panel on the router, then upload an Amnezia export in your browser. **No desktop converter or pre-generated `.conf` is required.** Conversion happens inside the router application.
 
-You can import `.vpn` or a key in `.txt` **directly on the router**, then rotate profiles by uploading to its inbox. See [router import and update](docs/ROUTER-IMPORT.en.md).
+## 1. Prerequisites
 
-## Prerequisites
+You need ARM64 (`aarch64`), Entware installed at `/opt`, root access to its SSH shell and `/dev/net/tun`. Tested hardware: Netcraze Giga NC-1012, revision 1210C000, NetcrazeOS 5.1.5, kernel 4.9-ndm-5. Other models have not been tested. Initial Entware setup is outside this guide.
 
-You need Entware, root access to its shell, storage mounted at `/opt`, and `/dev/net/tun`. See [README](README.en.md) for the tested model and firmware. This guide does not cover installing Entware itself.
+Back up router configuration and keep the ISP first in the default policy until VPN connectivity is verified.
 
-Back up your router configuration using its web interface. Keep the ISP first in the default connection policy. Use the router's local address for recovery.
+Create a **separate AmneziaWG client for the router** and prepare one of:
 
-Create a **separate client for the router** on your VPN server and export its AmneziaWG `.conf`. Do not reuse an active Windows profile: with identical keys, the server can switch packet delivery between devices. Never publish personal profiles.
+- a guest `.vpn` export containing an embedded AmneziaWG client configuration;
+- a `.txt` file containing that client's full `vpn://…` key;
+- the full `vpn://…` key to paste into the panel.
 
-Examples use `192.168.1.1` and SSH port **22**, as tested. Replace `22` if your Entware SSH server uses another port. SCP uses uppercase `-P`; SSH uses lowercase `-p`. The session must open a shell with a prompt such as `~ #`, not only the firmware CLI.
+An existing native `.conf` is also accepted, but you do not need to generate one. Never share a client key between a PC and router or multiple tunnels.
 
-## 0. If you only have an Amnezia key
+Not every Amnezia key contains a client configuration: subscription keys, administrative exports without a client profile, and a bare PrivateKey are insufficient. If import reports a missing AWG profile, obtain an AmneziaWG client export from the server owner/provider. Automatic subscription retrieval is not implemented. Do not rename `.vpn` to `.conf`.
 
-For direct router import, complete installation steps 1–2 below, then [install Python and import the export](docs/ROUTER-IMPORT.en.md) instead of copying a native `.conf` in step 3. This also supports automatic future replacement. PC conversion below remains an alternative.
+## 2. Download and copy
 
-If you have a **`.vpn` file or `vpn://…` key**, use the [offline converter](docs/CONVERTER.en.md): download the converter ZIP from the release, extract it, run `python tools/convert_profile.py --gui --lang en` (Python 3.10+ with tkinter required), select the file or paste the key, and save router.conf. Then proceed to step 1.
+Download `awg3-netcraze-arm64-userspace.tar.gz` and its `.sha256` from the [latest release](https://github.com/Parsefall/amnezia-netcraze/releases/latest). The converter ZIP is not needed.
 
-The converter extracts an embedded AWG client profile; subscription or full-access keys may not contain one. In that case, use the export methods below. Renaming .vpn to .conf does not convert it. A QR code or standalone PrivateKey is not sufficient.
-
-### Your own Amnezia server
-
-1. Open AmneziaVPN using a connection with full access to your server.
-2. Open Share VPN, create a separate user for the router, and choose the **AmneziaWG** protocol.
-3. Select **AmneziaWG native format**, not the format for the AmneziaVPN app. Labels may vary between application versions.
-4. Save the `.conf` file, for example `amnezia_for_awg.conf`, and rename a copy to `router.conf` for the commands below.
-
-If someone only gave you a guest `vpn://` key, ask them for a **separate native-format AmneziaWG profile for the router**. Possessing a key does not necessarily grant export or server administration permissions.
-
-[Official export instructions](https://docs.amnezia.org/documentation/instructions/amnezia-hosting-sharing/).
-
-### Amnezia Premium
-
-Open the Personal Dashboard using the official email/app link, sign in with your subscription key, find Configuration Files, and download a `.conf` for the desired location. Generating a configuration uses a connection slot. Do not paste a subscription key into router.conf.
-
-Amnezia documents these configurations as AWG 3.1, but **Amnezia Premium has not been separately tested with this project**. Automatic subscription updates are not implemented: a revoked or changed configuration requires a new file.
-
-[Official Personal Dashboard instructions](https://docs.amnezia.org/documentation/instructions/personal_dashboard/).
-
-### Recognizing a suitable file
-
-Inspect the file locally without sharing its contents. Expect `[Interface]` and `[Peer]` sections, Address, PrivateKey, PublicKey, AllowedIPs, Endpoint, and the server-issued AmneziaWG parameters. All connection settings are required, not just a key. These field names alone do not replace parser and server validation.
-
-The installer does not accept VLESS/XRay/OpenVPN or other configuration formats. Step 3 covers IPv4 limitations and preparing a copy. Once you have a suitable router.conf, proceed to step 1.
-
-## 1. Download and verify — Windows PowerShell
-
-Download the archive and `.sha256` from the [release](https://github.com/Parsefall/amnezia-netcraze/releases/latest) into the same folder. Open PowerShell **in that folder** (`PS C:\...>`):
+In **Windows PowerShell**, from your download directory:
 
 ```powershell
-$expected = ((Get-Content .\awg3-netcraze-arm64-userspace.tar.gz.sha256 -Raw).Trim() -split '\s+')[0]
-$actual = (Get-FileHash .\awg3-netcraze-arm64-userspace.tar.gz -Algorithm SHA256).Hash
-if ($actual -ne $expected) { throw 'Checksum mismatch. Do not install this archive.' }
+Get-FileHash .\awg3-netcraze-arm64-userspace.tar.gz -Algorithm SHA256
+Get-Content .\awg3-netcraze-arm64-userspace.tar.gz.sha256
+```
+
+Compare the hashes before continuing.
+
+```powershell
 scp -O -P 22 .\awg3-netcraze-arm64-userspace.tar.gz root@192.168.1.1:/opt/tmp/
 ssh -p 22 root@192.168.1.1
 ```
 
-`-O` selects the legacy SCP protocol because Entware may not provide SFTP. Password characters are not displayed while typing.
+Adjust the IP and SSH port if necessary. Use the Entware shell (`~ #`), not the firmware CLI.
 
-## 2. Install — router SSH shell
+## 3. Install the engine and panel
 
-Run the commands in order. Stop if any command fails.
+These commands are for a **first installation** and run in the **router SSH shell**. For an existing installation, use the update section below.
 
 ```sh
-mkdir -p /opt/tmp/awg3-install
-tar -xzf /opt/tmp/awg3-netcraze-arm64-userspace.tar.gz -C /opt/tmp/awg3-install
-cd /opt/tmp/awg3-install/awg3-userspace
+opkg update
+opkg install python3-light python3-codecs python3-openssl python3-email python3-urllib python3-logging openssl-util ca-bundle
+mkdir -p /opt/tmp/awg3-setup
+tar -xzf /opt/tmp/awg3-netcraze-arm64-userspace.tar.gz -C /opt/tmp/awg3-setup
+cd /opt/tmp/awg3-setup/awg3-userspace
 sh router/install.sh
+sh router/install-web.sh
 ```
 
-The installer checks the files and both ARM64 executables. Replaced files are backed up under `/opt/etc/awg3/backups/<date-PID>`. This is a project file backup, not a complete NDMS configuration backup. Autostart is disabled after installation. Existing profiles are preserved.
+Continue only if each command succeeds. Installers verify internal checksums. The VPN is not started, no profile is imported and routing remains unchanged at this stage.
 
-`amneziawg-go --version` may report `0.0.20250522`: this is a constant in the upstream source. The actual tag, commit, and SHA256 are recorded in `prebuilt/kn-1012/BUILD-INFO.json`.
-
-## 3. Copy your profile — Windows PowerShell
-
-Open another PowerShell tab **without SSH**. The example assumes `router.conf` is in the current directory:
-
-```powershell
-scp -O -P 22 .\router.conf root@192.168.1.1:/opt/etc/awg3/conf/router.conf
-```
-
-Use ASCII letters, digits, `_`, `-`, and `.` in the filename and end it with `.conf`. Every `.conf` in the directory is active; do not copy the example profile there.
-
-The wrapper supports one IPv4 Address, IPv4 DNS, and one peer. If AllowedIPs includes `::/0`, use Python and the project source to create a separate copy:
-
-```powershell
-python build/prepare_profile.py original.conf router.conf --ipv4-only
-```
-
-The utility removes IPv6 only from AllowedIPs. IPv6 Address/DNS entries still require a valid IPv4-only profile. Do not invent keys, Endpoint settings, or obfuscation parameters, or replace them with sample values.
-
-## 4. Start — router SSH shell
+Set the panel password and your LAN parameters:
 
 ```sh
-chmod 600 /opt/etc/awg3/conf/router.conf
-/opt/etc/init.d/S99awg3 up
-/opt/etc/init.d/S99awg3 status
+/opt/bin/python3 /opt/lib/awg3/web/server.py --setup --bind 192.168.1.1 --network 192.168.1.0/24 --port 8088
+/opt/etc/init.d/S101awg3-web enable
 ```
 
-Note the assigned `OpkgTunN` / `opkgtunN`: the index is not necessarily 0. The web interface uses the profile filename as the connection name, `router` here. Wait for a handshake. A connected status alone does not prove Internet access.
+Adjust the address/subnet to your LAN. The separate panel password is 12–128 characters and entered twice without echo. Record the displayed certificate fingerprint.
 
-## 5. Configure routing and test the PC
+## 4. Add a tunnel in your browser
 
-Choose **one** setup in [ROUTING.en.md](docs/ROUTING.en.md):
+1. Open **https://192.168.1.1:8088** from the LAN. The self-signed certificate triggers a browser warning; compare its fingerprint with setup output. See the [panel guide](docs/WEB.en.md).
+2. Sign in with your panel password.
+3. Open **Tunnels → Add tunnel**.
+4. Enter a unique Latin name, choose a `.vpn`/`.txt` file **or** paste the full key.
+5. Click **Create and start**.
 
-- Selected IPs through VPN: ISP first, static routes to the VPN, no default route through VPN.
-- An entire device through VPN: a separate policy and an explicitly added tunnel default route; start with one test device.
+The application validates and converts the export, then saves its internal configuration with restricted permissions. You do not create or edit `.conf` manually. Add more tunnels the same way, with a separate client key for each.
 
-Disable the PC's VPN application while testing. Check HTTPS and the external IPv4 address on the intended path. Windows commands belong in PowerShell, not the router SSH shell. Then configure [Ping Check](docs/HEALTHCHECK.en.md).
+## 5. Routing, checks and autostart
 
-## 6. Save and enable autostart — router SSH shell
+Creating a tunnel does not automatically route all Internet traffic through it. Choose a [routing setup](docs/ROUTING.en.md) in the router's native interface.
 
-Only after successful testing:
+Enable [PingCheck](docs/HEALTHCHECK.en.md) in that tunnel's settings (⚙). Check status, external IP and website access from a device assigned VPN routing, with its own VPN application disabled.
 
-```sh
-/opt/etc/init.d/S99awg3 save
-/opt/etc/init.d/S99awg3 enable
-```
+Enable VPN autostart in panel Settings. It is global; individually paused tunnels remain paused. Watchdog is separately enabled and recovers the local engine; PingCheck tests connectivity through the tunnel. Actual outage failover has not yet been tested on hardware.
 
-`Saving (cli)` identifies the source of the save command. The current NDMS configuration is saved. The autostart flag is stored separately on `/opt`.
+Save firmware configuration after changing routes and PingCheck. The PingCheck save button saves **all current router configuration**, including other pending changes. Verify connectivity again after reboot. The panel has separate autostart.
 
-Reboot when convenient and repeat status, DNS, HTTPS, and external IP checks. If connectivity fails, use the local web interface to put the ISP first and return the test PC to the default policy. Reconnect SSH after rebooting.
+## Replacing a key or server
 
-## Updating
+Open **Tunnels → ⚙ for the target tunnel → Replace VPN key**, upload a new `.vpn`/`.txt` or paste its key, then apply it. Replace the existing tunnel's key instead of creating another tunnel when you want to retain routing and policy associations.
 
-Return clients to the ISP. Preserve keys, routes, and managed.tsv.
+The interface identifier and associations are retained; check traffic after replacement. Update any manually created route to the old server endpoint separately. The new profile must permit your destinations in AllowedIPs.
 
-```sh
-/opt/etc/init.d/S99awg3 disable
-```
+## Updating the application
 
-Reboot: stop keeps TUN processes alive, and the installer refuses to replace a running engine. After booting, repeat installation, manual startup, validation, and enable/save. The installer does not remove old routes: check for an existing default route pointing to the VPN. Version 0.1.0 and later no longer create it automatically.
+From v0.8.0, use **Settings → Application update → Check → Update**. The router downloads and verifies compatible releases and creates a backup. Sign in again after the panel restarts. See [panel updating](docs/WEB.en.md) for rollback and limitations.
 
-Ping Check is saved in NDMS independently of the package. The optional UAPI watchdog is enabled separately, does not replace Ping Check, and is not needed for the initial setup.
+For an older panel, copy and extract the new package, install the dependencies from step 3 and run **only `sh router/install-web.sh`**, then reload with Ctrl+F5. Existing passwords, certificates and profiles are retained; do not repeat `--setup`.
 
-## Removal and rollback
+Releases changing VPN binaries require manual updating. Move clients back to the ISP and back up profiles/settings. Run `/opt/etc/init.d/S99awg3 disable`, then reboot: stopping the service retains TUN processes, and the installer refuses to replace a running engine. After reboot run both installers, check routes, start the required tunnels and re-enable autostart.
 
-Return clients to the ISP policy, disable your VPN routes, and run `/opt/etc/init.d/S99awg3 disable`, then `/opt/etc/init.d/S99awg3 stop`. You can run `sh router/uninstall.sh` from the extracted archive; it preserves profiles, binaries, backups, and NDMS objects. This is not a complete network rollback. Disable autostart and reboot before restoring files from backup. Do not restore the incompatible `amneziawg.ko` kernel module.
+## Alternative tools and removal
 
-Since v0.6.0, `disable` only disables autostart; run `stop` separately to stop VPN.
+[SSH/inbox import](docs/ROUTER-IMPORT.en.md) and the [offline desktop converter](docs/CONVERTER.en.md) are optional alternatives, not prerequisites for the panel workflow.
+
+To uninstall, move clients back to the ISP and disable your VPN routes. Run `/opt/etc/init.d/S99awg3 disable`, then `/opt/etc/init.d/S99awg3 stop`. The package's `sh router/uninstall.sh` preserves profiles, binaries, backups and NDMS objects; it is not a full network rollback. Do not restore the incompatible legacy `amneziawg.ko`.

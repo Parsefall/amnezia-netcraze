@@ -1,5 +1,7 @@
 # Convert .vpn / vpn:// to router.conf
 
+This is an optional desktop tool. The [panel installation](../INSTALL.en.md) does not require it: upload `.vpn`/`.txt` or paste a key directly in your browser.
+
 [Русский](CONVERTER.md) | **English**
 
 To avoid conversion on a PC, use [router import](ROUTER-IMPORT.en.md): it accepts .vpn or .txt and can automatically replace an existing profile.

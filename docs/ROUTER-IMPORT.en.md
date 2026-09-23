@@ -1,5 +1,7 @@
 # Import .vpn files and keys on the router
 
+This page describes the optional SSH/inbox workflow. For normal installation, use the [panel and browser upload](../INSTALL.en.md).
+
 [Русский](ROUTER-IMPORT.md) | **English**
 
 Since v0.3.0, a new Amnezia export can replace an existing client profile after server migration or reinstallation. The profile name retains the same OpkgTun, policies, routes, PingCheck and interface priority. The new server must still allow the required destinations in AllowedIPs. This does not migrate server settings.

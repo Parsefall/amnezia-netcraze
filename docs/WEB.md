@@ -22,9 +22,9 @@ ssh -p 22 root@192.168.1.1
 ```sh
 opkg update
 opkg install python3-light python3-codecs python3-openssl python3-email python3-urllib python3-logging openssl-util ca-bundle
-mkdir -p /opt/tmp/awg3-v040
-tar -xzf /opt/tmp/awg3-netcraze-arm64-userspace.tar.gz -C /opt/tmp/awg3-v040
-sh /opt/tmp/awg3-v040/awg3-userspace/router/install-web.sh
+mkdir -p /opt/tmp/awg3-panel-update
+tar -xzf /opt/tmp/awg3-netcraze-arm64-userspace.tar.gz -C /opt/tmp/awg3-panel-update
+sh /opt/tmp/awg3-panel-update/awg3-userspace/router/install-web.sh
 ```
 
 Пакеты Python разделены в [Entware ARM64](https://bin.entware.net/aarch64-k3.10/), поэтому одной установки python3-light для HTTPS-панели недостаточно. pip и сторонние Python-библиотеки не нужны. Установщик проверяет импорт модулей и контрольные суммы, обновляет скрипты импорта, сохраняет резервные копии, устанавливает панель. VPN-движок и существующие профили не заменяются, маршруты не меняются, VPN не перезапускается.

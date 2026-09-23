@@ -22,9 +22,9 @@ ssh -p 22 root@192.168.1.1
 ```sh
 opkg update
 opkg install python3-light python3-codecs python3-openssl python3-email python3-urllib python3-logging openssl-util ca-bundle
-mkdir -p /opt/tmp/awg3-v040
-tar -xzf /opt/tmp/awg3-netcraze-arm64-userspace.tar.gz -C /opt/tmp/awg3-v040
-sh /opt/tmp/awg3-v040/awg3-userspace/router/install-web.sh
+mkdir -p /opt/tmp/awg3-panel-update
+tar -xzf /opt/tmp/awg3-netcraze-arm64-userspace.tar.gz -C /opt/tmp/awg3-panel-update
+sh /opt/tmp/awg3-panel-update/awg3-userspace/router/install-web.sh
 ```
 
 Python modules are split into packages in [ARM64 Entware](https://bin.entware.net/aarch64-k3.10/). No pip or third-party Python library is required. The installer checks imports/checksums, updates import scripts with backups, and installs the panel. Engine binaries/profiles are retained; VPN and routes are not restarted or changed.
