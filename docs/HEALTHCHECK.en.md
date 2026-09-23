@@ -4,6 +4,17 @@
 
 A green interface and a recent handshake do not guarantee Internet access. The package watchdog checks local UAPI availability, not packet delivery. Use NDMS's built-in Ping Check to monitor connectivity.
 
+## PingCheck in the panel (v0.5.0)
+
+Open **Diagnostics → PingCheck**, select a VPN interface and choose **Enable / apply**. Recommended values: `1.1.1.1`, 10-second interval, 3-second timeout, 3 failures, 2 successes. The fields are a new-settings template; current firmware output appears above them. Automatic refresh preserves edited fields.
+
+Checks run in firmware using ICMP, without restarting the interface. The panel creates a separate profile for the selected VPN rather than editing a shared ISP profile. Disable detaches the check only from the selected VPN. Errors trigger an attempt to restore the previous assignment; unconfirmed rollback is explicitly reported. Routes and priorities are unchanged.
+
+After applying, wait for `status: pass`. Choose **Save router configuration** to retain changes after reboot. This saves the **entire current firmware configuration**, including other unsaved changes. Apply alone only updates the running configuration.
+
+Failure and rollback paths are tested against simulated firmware. The new form and actual outage failover have not yet been verified on hardware. `pass` does not prove fallback works; policies and routes also matter. These CLI commands and a `pass` state were previously checked on Netcraze Giga NC-1012, NetcrazeOS 5.1.5.
+
+
 ## Verified command sequence
 
 Replace OpkgTun0 with your interface. Run these commands in the **router's SSH shell**. First run `ndmc -c "show ping-check"`; do not replace an existing profile without understanding its purpose. Use different profile names for multiple tunnels.
@@ -47,7 +58,7 @@ The policy must allow the ISP for fallback. **Exclusive static routes prohibit b
 ## Removing the binding
 
 ```sh
-ndmc -c "interface OpkgTun0 no ping-check profile AWG3Check"
+ndmc -c "interface OpkgTun0 no ping-check profile"
 ```
 
 Use your own names, check show ping-check, and save the configuration. The unbound profile can remain unused.

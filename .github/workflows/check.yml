@@ -20,5 +20,7 @@ jobs:
         run: python3 -m unittest discover -s tests -p test_converter.py -v
       - name: HTTPS panel tests
         run: python3 -m unittest discover -s tests -p test_web.py -v
+      - name: PingCheck firmware regression tests
+        run: python3 -m unittest discover -s tests -p test_pingcheck.py -v
       - name: Validate binary metadata and package
         run: python3 build/package.py

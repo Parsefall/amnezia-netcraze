@@ -2,15 +2,15 @@
 
 [Русский](WEB.md) | **English**
 
-The v0.4.1 panel runs **on the router itself** through Entware. A computer or phone only provides the browser. It has its own HTTPS address; it is not a card in Netcraze's built-in Applications page. Includes Russian and English UI.
+The v0.5.0 panel runs **on the router itself** through Entware. A computer or phone only provides the browser. It has its own HTTPS address; it is not a card in Netcraze's built-in Applications page. Includes Russian and English UI.
 
-Features: file/key import, existing-profile replacement, start/stop of the whole VPN service, autostart, watchdog/inbox, handshake timestamps, traffic counters, PingCheck view, filtered log, backup restore and panel password change. Routing, device policies and PingCheck configuration stay in the firmware UI.
+Features: file/key import, existing-profile replacement, start/stop of the whole VPN service, autostart, watchdog/inbox, handshake timestamps, traffic counters, PingCheck controls and status, filtered log, backup restore and panel password change. Routing and device policies stay in the firmware UI.
 
 ## Install over an existing project installation
 
-Requires Entware and Amnezia Netcraze. For a new router, first follow [VPN installation](../INSTALL.en.md); you can then import a profile through the panel. Prior hardware testing is limited to Netcraze Giga NC-1012, hw 1210C000, aarch64, NetcrazeOS 5.1.5, kernel 4.9-ndm-5. **The new web panel has not yet been tested on physical hardware.**
+Requires Entware and Amnezia Netcraze. For a new router, first follow [VPN installation](../INSTALL.en.md); you can then import a profile through the panel. Prior hardware testing is limited to Netcraze Giga NC-1012, hw 1210C000, aarch64, NetcrazeOS 5.1.5, kernel 4.9-ndm-5. The owner confirmed v0.4.1 panel startup on this router; the new PingCheck form has only been tested with simulated firmware.
 
-1. Download `awg3-netcraze-arm64-userspace.tar.gz` from [v0.4.1](https://github.com/Parsefall/amnezia-netcraze/releases/tag/v0.4.1). In PC PowerShell from the download directory:
+1. Download `awg3-netcraze-arm64-userspace.tar.gz` from [v0.5.0](https://github.com/Parsefall/amnezia-netcraze/releases/tag/v0.5.0). In PC PowerShell from the download directory:
 
 ```powershell
 scp -O -P 22 .\awg3-netcraze-arm64-userspace.tar.gz root@192.168.1.1:/opt/tmp/
@@ -88,3 +88,13 @@ The browser polls every 15 seconds only while visible. No CDN, analytics or remo
 ## Fixing nohup: not found in 0.4.0
 
 Dependencies, password and certificate setup do not need repeating. Replace only `/opt/etc/init.d/S101awg3-web` with the 0.4.1 file, chmod 755 and enable it using the full path. Startup now uses shell builtins; nohup is not required. Router logs confirmed this issue on NC-1012; corrected hardware startup is awaiting confirmation.
+
+## PingCheck in the panel (v0.5.0)
+
+Open **Diagnostics → PingCheck**, select a VPN interface and choose **Enable / apply**. Recommended values: `1.1.1.1`, 10-second interval, 3-second timeout, 3 failures, 2 successes. The fields are a new-settings template; current firmware output appears above them. Automatic refresh preserves edited fields.
+
+Checks run in firmware using ICMP, without restarting the interface. The panel creates a separate profile for the selected VPN rather than editing a shared ISP profile. Disable detaches the check only from the selected VPN. Errors trigger an attempt to restore the previous assignment; unconfirmed rollback is explicitly reported. Routes and priorities are unchanged.
+
+After applying, wait for `status: pass`. Choose **Save router configuration** to retain changes after reboot. This saves the **entire current firmware configuration**, including other unsaved changes. Apply alone only updates the running configuration.
+
+Failure and rollback paths are tested against simulated firmware. The new form and actual outage failover have not yet been verified on hardware. `pass` does not prove fallback works; policies and routes also matter. These CLI commands and a `pass` state were previously checked on Netcraze Giga NC-1012, NetcrazeOS 5.1.5.

@@ -183,10 +183,115 @@ class Application:
                 'pingcheck': clean_diagnostic(ping) if rc == 0 else 'PingCheck unavailable',
                 'busy': self.operation.locked()}
 
+    def ndmc(self, text):
+        rc, output = self.runner(['ndmc', '-c', text], 12)
+        if rc or re.search(r'\b(?:error\[|error:|failed|invalid)', output, re.I):
+            # Do not return firmware output: running-config can contain secrets.
+            raise PanelError(400, 'Firmware command failed: ' + text.split()[0])
+        return output
+
+    def pingcheck_action(self, body):
+        action = body['action']
+        iface = body.get('interface', '')
+        if action != 'pingcheck-save':
+            if not isinstance(iface, str) or not re.fullmatch(r'OpkgTun(0|[1-9][0-9]?)', iface):
+                raise PanelError(400, 'Select a managed VPN interface.')
+            idx = iface[7:]
+            managed = self.base/'managed.tsv'
+            rows = managed.read_text().splitlines() if managed.exists() else []
+            owned = False
+            for row in rows:
+                fields = row.split('\t')
+                if len(fields) != 3: continue
+                path, number, name = fields
+                stem = Path(path).stem
+                if (number == idx and name == iface and NAME.fullmatch(stem)
+                        and Path(path) == self.base/'conf'/(stem+'.conf')
+                        and stem in self.profiles()): owned = True
+            if not owned: raise PanelError(400, 'Interface is not managed by this service.')
+        values = {}
+        if action == 'pingcheck-apply':
+            try:
+                host = ipaddress.IPv4Address(body.get('host', ''))
+                if host.is_multicast or host.is_unspecified or host.is_loopback or host.is_link_local or host.is_reserved:
+                    raise ValueError()
+            except (ValueError, TypeError):
+                raise PanelError(400, 'Enter a unicast IPv4 test address.') from None
+            for name, low, high in [('update-interval', 5, 3600), ('timeout', 1, 30),
+                                    ('max-fails', 1, 100), ('min-success', 1, 100)]:
+                value = body.get(name)
+                if type(value) is not int or not low <= value <= high:
+                    raise PanelError(400, 'Invalid ' + name)
+                values[name] = value
+            if values['timeout'] >= values['update-interval']:
+                raise PanelError(400, 'Timeout must be shorter than the interval.')
+        self.runpath.mkdir(parents=True, exist_ok=True)
+        lock = self.runpath/'service.lock'
+        try: lock.mkdir()
+        except FileExistsError: raise PanelError(409, 'VPN service is busy. Try again later.') from None
+        try:
+            (lock/'pid').write_text(str(os.getpid())+'\n')
+            if action == 'pingcheck-save':
+                self.ndmc('system configuration save')
+                return {'message': 'Firmware configuration saved, including other pending router changes.'}
+            config = self.ndmc('show running-config')
+            # Only retain whitelisted PingCheck commands from this interface block.
+            match = re.search(r'^interface '+re.escape(iface)+r'\s*\n((?:[ \t]+[^\n]*\n|[ \t]*\n)*)', config+'\n', re.M)
+            if not match: raise PanelError(400, 'VPN interface not found in firmware configuration.')
+            previous = None
+            restart = None
+            for line in match[1].splitlines():
+                line = line.strip()
+                if line.startswith('ping-check profile '):
+                    previous = line.removeprefix('ping-check profile ')
+                    if not re.fullmatch(r'[A-Za-z0-9_.-]{1,64}', previous):
+                        raise PanelError(400, 'Existing profile name cannot be safely restored.')
+                if line.startswith('ping-check restart'):
+                    if not re.fullmatch(r'ping-check restart(?: [A-Za-z0-9_./-]{1,64})?', line):
+                        raise PanelError(400, 'Existing restart setting cannot be safely restored.')
+                    restart = line
+            if action == 'pingcheck-disable':
+                if previous: self.ndmc('interface '+iface+' no ping-check profile')
+                return {'message': 'PingCheck detached. Save firmware configuration to retain this after reboot.'}
+            profile = 'AWG3Web'+idx+'_'+secrets.token_hex(4)
+            assigned = False
+            created = False
+            try:
+                self.ndmc('ping-check profile '+profile)
+                created = True
+                for setting in ['host '+str(host), 'mode icmp'] + [k+' '+str(v) for k,v in values.items()]:
+                    self.ndmc('ping-check profile '+profile+' '+setting)
+                assigned = True  # A timeout/error may occur after firmware applied the command.
+                self.ndmc('interface '+iface+' ping-check profile '+profile)
+                self.ndmc('interface '+iface+' no ping-check restart')
+            except (PanelError, OSError):
+                try:
+                    if assigned:
+                        self.ndmc('interface '+iface+(' ping-check profile '+previous if previous else ' no ping-check profile'))
+                        if previous:
+                            self.ndmc('interface '+iface+' '+(restart or 'no ping-check restart'))
+                    if created: self.ndmc('no ping-check profile '+profile)
+                except (PanelError, OSError):
+                    raise PanelError(500, 'PingCheck failed and rollback could not be confirmed. Inspect Netcraze configuration.') from None
+                raise PanelError(400, 'PingCheck failed; previous assignment retained. Nothing saved to startup configuration.') from None
+            # Remove only a previous panel-created profile with no other references.
+            warning = ''
+            if previous and re.fullmatch(r'AWG3Web[0-9]{1,2}_[0-9a-f]{8}', previous):
+                references = re.findall(r'^\s+ping-check profile '+re.escape(previous)+r'\s*$', config, re.M)
+                if len(references) == 1:
+                    try: self.ndmc('no ping-check profile '+previous)
+                    except (PanelError, OSError): warning = ' Previous unused profile could not be removed.'
+            return {'message': 'PingCheck applied. Wait for checks, then save firmware configuration for reboot.'+warning}
+        finally:
+            (lock/'pid').unlink(missing_ok=True)
+            lock.rmdir()
+
     def execute(self, body):
         if not self.operation.acquire(blocking=False): raise PanelError(409, 'Another operation is running.')
         try:
             action = body.get('action')
+            if action in ('pingcheck-apply', 'pingcheck-disable', 'pingcheck-save'):
+                return self.pingcheck_action(body)
             if action in ('up','stop','enable','disable'):
                 args = [SERVICE, action]
             elif action in ('watchdog-enable','watchdog-disable'):

@@ -54,3 +54,7 @@ Not verified: IPv6, every combination of AWG parameters, long-term stability, th
 ## Web panel v0.4.0
 
 14 HTTPS/API tests and mocked-router browser validation passed. Details and limits: [WEB.en.md](docs/WEB.en.md#validation-and-resource-use). Panel not yet installed on router; RSS/CPU unmeasured.
+
+## v0.5.0
+
+Panel v0.5.0: 42 Python tests (16 converter, 14 HTTPS/API, 12 PingCheck). Edge against simulated firmware: apply, disable, save, interface selection, edited values retained on refresh, RU/EN and 390 px mobile layout. The owner confirmed v0.4.1 startup on NC-1012. The new form and actual VPN outage have not been tested on hardware.

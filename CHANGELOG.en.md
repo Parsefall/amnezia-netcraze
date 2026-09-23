@@ -2,6 +2,10 @@
 
 [Русский](CHANGELOG.md) | **English**
 
+## 0.5.0
+
+Panel PingCheck controls: IPv4 target, intervals and thresholds, enable/disable, explicit full-router configuration save. Isolated profiles, import locking, assignment rollback on failure, RU/EN. 12 simulated-firmware tests; actual outage failover remains untested.
+
 ## 0.4.1
 
 Fixed panel startup on Entware without nohup. A shell trap ignores SIGHUP before exec Python; credentials, TLS certificate and VPN are unchanged. Added Linux startup/idempotency/SIGHUP/stop regression coverage.
