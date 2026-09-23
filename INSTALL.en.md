@@ -2,7 +2,7 @@
 
 [Русский](INSTALL.md) | **English**
 
-The main installation flow is to install the VPN engine and web panel on the router, then upload an Amnezia export in your browser. **No desktop converter or pre-generated `.conf` is required.** Conversion happens inside the router application.
+Install the application on your router, open the web panel and add an AmneziaWG client profile by uploading an export or pasting its full key.
 
 ## 1. Prerequisites
 
@@ -22,7 +22,7 @@ Not every Amnezia key contains a client configuration: subscription keys, admini
 
 ## 2. Download and copy
 
-Download `awg3-netcraze-arm64-userspace.tar.gz` and its `.sha256` from the [latest release](https://github.com/Parsefall/amnezia-netcraze/releases/latest). The converter ZIP is not needed.
+Download `awg3-netcraze-arm64-userspace.tar.gz` and its `.sha256` from the [latest release](https://github.com/Parsefall/amnezia-netcraze/releases/latest).
 
 In **Windows PowerShell**, from your download directory:
 

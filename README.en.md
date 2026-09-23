@@ -2,9 +2,18 @@
 
 [Русский](README.md) | **English**
 
-Manage AmneziaWG in a browser: upload a `.vpn`/`.txt` export or paste a full client key, create multiple tunnels and configure their names and PingCheck. The panel runs on the router. **No desktop converter or pre-generated `.conf` is required.** [Installation](INSTALL.en.md) · [Panel guide](docs/WEB.en.md).
+Amnezia VPN on your router, with a convenient web panel. Manage VPN connections from your computer or phone: add tunnels, replace keys and check connection status in your browser. The application runs on the router.
 
-AmneziaWG 3.1 for Netcraze through Entware: a ready-to-install ARM64 package, a userspace engine, and integration with the router's routing policies. No `amneziawg.ko` kernel module is required.
+## Features
+
+- **Easy setup:** create an AmneziaWG client profile in Amnezia, then upload its `.vpn`/`.txt` export or paste the full client key into the panel.
+- **Multiple VPN tunnels:** create, name, start, pause and delete connections, with individual settings for each tunnel.
+- **Connection monitoring:** view tunnel status and configure PingCheck.
+- **Autostart and recovery:** start VPN after router reboot and use watchdog to recover an unresponsive local engine.
+- **Convenient maintenance:** view logs, replace a tunnel's key and install compatible updates from GitHub through the panel.
+- **Russian and English interface.**
+
+[Installation guide](INSTALL.en.md) · [Panel guide](docs/WEB.en.md) · [Download](https://github.com/Parsefall/amnezia-netcraze/releases/latest)
 
 **Tested ONLY on the project owner's Netcraze Giga NC-1012:** hardware revision **1210C000**, ARM64 (`aarch64`), firmware **5.1.5 / 5.01.C.5.0-0**, Linux **4.9-ndm-5**, Entware on external storage, and `/dev/net/tun`. Compatibility with other models or firmware versions is not claimed.
 
@@ -15,8 +24,6 @@ AmneziaWG 3.1 for Netcraze through Entware: a ready-to-install ARM64 package, a 
 3. Follow the [installation guide](INSTALL.en.md): install the engine and panel, then upload `.vpn`/`.txt` or paste your key in **Tunnels → Add tunnel**.
 4. Choose a [routing setup](docs/ROUTING.en.md).
 5. Configure [Ping Check](docs/HEALTHCHECK.en.md), verify connectivity, and enable autostart.
-
-The installer checks file hashes, backs up replaced files, and **does not start the VPN, import keys, or change connection priorities**. Starting the VPN does not add a default route either: routing is an explicit user decision.
 
 ## System requirements
 
@@ -44,4 +51,4 @@ The installer checks file hashes, backs up replaced files, and **does not start 
 - [Architecture](ARCHITECTURE.en.md), [building](docs/BUILD.en.md)
 - [Changelog](CHANGELOG.en.md), [provenance and licenses](NOTICE.en.md)
 
-The engine is official [amneziawg-go](https://github.com/amnezia-vpn/amneziawg-go) with a local S4 race fix. This is an independent project, not an official Netcraze or Amnezia product.
+The engine is official [amneziawg-go](https://github.com/amnezia-vpn/amneziawg-go). This is an independent project, not an official Netcraze or Amnezia product.
