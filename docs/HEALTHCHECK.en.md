@@ -4,9 +4,9 @@
 
 A green interface and a recent handshake do not guarantee Internet access. The package watchdog checks local UAPI availability, not packet delivery. Use NDMS's built-in Ping Check to monitor connectivity.
 
-## PingCheck in the panel (v0.5.0)
+## PingCheck in the panel (v0.7.0)
 
-Open **Diagnostics → PingCheck**, select a VPN interface and choose **Enable / apply**. Recommended values: `1.1.1.1`, 10-second interval, 3-second timeout, 3 failures, 2 successes. The fields are a new-settings template; current firmware output appears above them. Automatic refresh preserves edited fields.
+Open **Tunnels → ⚙ → PingCheck** for the intended tunnel and choose **Enable / apply**. Recommended values: `1.1.1.1`, 10-second interval, 3-second timeout, 3 failures, 2 successes. The fields are a new-settings template; the tunnel’s current state appears above them. Automatic refresh preserves edited fields.
 
 Checks run in firmware using ICMP, without restarting the interface. The panel creates a separate profile for the selected VPN rather than editing a shared ISP profile. Disable detaches the check only from the selected VPN. Errors trigger an attempt to restore the previous assignment; unconfirmed rollback is explicitly reported. Routes and priorities are unchanged.
 

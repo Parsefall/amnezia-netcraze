@@ -117,6 +117,40 @@ class PanelTests(unittest.TestCase):
         for name in ['../router','/etc/passwd','x;id','router.conf']:
             self.assertEqual(self.request('POST','/api/action',{'action':'import','name':name,'data':data})[0],400)
         self.assertEqual(self.request('POST','/api/action',{'action':'import','name':'router','data':'!!!'})[0],400)
+    def test_per_tunnel_actions(self):
+        self.login()
+        for action in ('tunnel-up','tunnel-down','delete'):
+            self.assertEqual(self.request('POST','/api/action',{'action':action,'name':'router'})[0],200)
+            self.assertEqual(self.calls[-1],[w.SERVICE,action,'router'])
+            for name in ['unknown','../router','router; reboot']:
+                self.assertEqual(self.request('POST','/api/action',{'action':action,'name':name})[0],400)
+        self.assertEqual(self.request('POST','/api/action',{'action':'rename','name':'router','label':'My VPN'})[0],200)
+        self.assertEqual(self.calls[-1],[w.SERVICE,'rename','router','My VPN'])
+    def test_create_uses_fixed_command(self):
+        self.login()
+        body={'action':'create','name':'second','data':base64.b64encode(b'synthetic').decode()}
+        self.assertEqual(self.request('POST','/api/action',body)[0],200)
+        self.assertEqual(self.calls[-1][0:2],[w.SERVICE,'create'])
+        self.assertEqual(self.calls[-1][-1],'second')
+        self.assertFalse(Path(self.calls[-1][2]).exists())
+    def test_paused_and_unmapped_profiles(self):
+        (self.base/'conf/second.conf').write_text('synthetic')
+        (self.base/'paused').mkdir();(self.base/'paused/router').touch()
+        self.app.runpath.mkdir();(self.app.runpath/'running').touch()
+        self.login()
+        data=json.loads(self.request('GET','/api/status')[2])
+        byname={x['profile']:x for x in data['tunnels']}
+        self.assertFalse(byname['router']['active'])
+        self.assertEqual(byname['router']['connection'],'disconnected')
+        self.assertIsNone(byname['second']['interface'])
+        (self.base/'paused/router').unlink()
+        (self.app.runpath/'stopped-0').touch()
+        data=json.loads(self.request('GET','/api/status')[2])
+        self.assertTrue(data['tunnels'][0]['stopped'])
+        self.assertFalse(data['tunnels'][0]['active'])
+        (self.base/'conf/router.conf').unlink()
+        data=json.loads(self.request('GET','/api/status')[2])
+        self.assertEqual([x['profile'] for x in data['tunnels']],['second'])
     def test_failure_redaction(self):
         self.login();self.fail_action=True
         status,_,raw=self.request('POST','/api/action',{'action':'stop'})

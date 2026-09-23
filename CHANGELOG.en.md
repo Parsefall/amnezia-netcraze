@@ -2,6 +2,10 @@
 
 [Русский](CHANGELOG.md) | **English**
 
+## 0.7.0
+
+Minimal overview, Tunnels tab with per-tunnel settings, separate log. Multiple concurrent VPNs with independent start/pause/delete and scoped key/PingCheck controls. Startup and repair respect pause; duplicate client keys are rejected. Deletion saves a backup and reserves the old index. Physical hardware validation remains pending.
+
 ## 0.6.0
 
 PingCheck-based connection status, state-aware buttons, independent autostart disable and persistent tunnel display names. Removed two overview captions. Uninstall now explicitly stops VPN. Firmware interface type is unchanged.

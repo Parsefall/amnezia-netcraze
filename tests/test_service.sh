@@ -31,6 +31,7 @@ case "$1 $2" in
     'interface '*)
         [ ! -f "$MOCK/reject-ndms" ] || { echo 'error: rejected'; exit 0; }
         touch "$MOCK/ndms/$2";;
+    'no interface') [ ! -f "$MOCK/reject-delete" ] || { echo 'error: rejected'; exit 0; }; rm -f "$MOCK/ndms/$3";;
     'system configuration') :;;
     'ip name-server'|'ip route') :;;
     *) exit 1;;
@@ -180,10 +181,67 @@ test ! -f "$BASE/enabled"
 test -f "$RUN/running"
 test ! -s "$TMP/calls"
 
+# Add a third tunnel while two existing ones remain undisturbed.
+sed 's/PrivateKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=/PrivateKey = AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=/' "$TMP/new.conf" > "$TMP/third.conf"
+: > "$TMP/calls"
+import_profile "$TMP/third.conf" c create >/dev/null
+test -f "$CONF/c.conf"
+grep -Fq "$(printf '%s\t3\tOpkgTun3' "$CONF/c.conf")" "$STATE"
+! grep -Eq 'interface OpkgTun[12] (down|description|ip)|setconf opkgtun[12]' "$TMP/calls"
+if import_profile "$TMP/third.conf" d create >/dev/null; then echo 'Duplicate key accepted'; exit 1; fi
+test ! -f "$CONF/d.conf"
+# Pausing one tunnel survives startup and import; the other remains active.
+tunnel_down c >/dev/null
+: > "$TMP/calls"
+import_profile "$TMP/third.conf" c >/dev/null
+! grep -q 'interface OpkgTun3' "$TMP/calls"
+start_service >/dev/null
+! grep -q 'interface OpkgTun3' "$TMP/calls"
+test -f "$BASE/paused/c"
+tunnel_up c >/dev/null
+test ! -f "$BASE/paused/c"
+# Verified termination only signals the recorded selected process.
+printf '%s\n' 4242 > "$RUN/opkgtun3.pid"
+kill() { [ "$1" = -TERM ] && [ "$2" = 4242 ] || return 1; rm -f "$TMP/interfaces/opkgtun3"; }
+terminate_engine opkgtun3
+test ! -f "$RUN/opkgtun3.pid"
+# Recreate the mock engine for deletion failure paths.
+touch "$TMP/interfaces/opkgtun3"
+# Deletion refuses an unowned engine and retains a paused, retryable profile.
+terminate_engine() { return 1; }
+if delete_tunnel c >/dev/null; then exit 1; fi
+test -f "$CONF/c.conf"; test -f "$BASE/paused/c"
+# After verified termination only the selected firmware object is deleted.
+terminate_engine() { rm -f "$TMP/interfaces/$1"; }
+touch "$TMP/reject-delete"
+if delete_tunnel c >/dev/null; then exit 1; fi
+test -f "$CONF/c.conf"
+rm "$TMP/reject-delete"
+: > "$TMP/calls"
+delete_tunnel c >/dev/null
+test ! -f "$CONF/c.conf"; test ! -f "$TMP/ndms/OpkgTun3"
+test -f "$TMP/ndms/OpkgTun1"; test -f "$TMP/ndms/OpkgTun2"
+test "$(find "$BASE/backups/deleted" -name profile.conf | wc -l)" -ge 1
+if import_profile "$TMP/third.conf" c create >/dev/null; then echo 'Deleted name/index reused'; exit 1; fi
+import_profile "$TMP/third.conf" d create >/dev/null
+grep -Fq "$(printf '%s\t4\tOpkgTun4' "$CONF/d.conf")" "$STATE"
+
+# Starting one after a global stop leaves other engines administratively stopped.
+stop_service >/dev/null
+tunnel_up b >/dev/null
+test -f "$RUN/stopped-1"; test -f "$RUN/stopped-4"; test ! -f "$RUN/stopped-2"
+: > "$TMP/calls"
+repair 1 >/dev/null
+test ! -s "$TMP/calls"
+import_profile "$TMP/third.conf" d >/dev/null
+test ! -s "$TMP/calls"
+start_service >/dev/null
+test ! -f "$RUN/stopped-1"; test ! -f "$RUN/stopped-4"
+
 # Removed source retains reserved ownership and never triggers broad cleanup.
 rm "$CONF/a.conf"
 start_service >/dev/null
-test "$(wc -l < "$STATE")" -eq 2
+test "$(wc -l < "$STATE")" -eq 4
 test -f "$TMP/ndms/OpkgTun1"
 stop_service >/dev/null
 test ! -f "$RUN/running"

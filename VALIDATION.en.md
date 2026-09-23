@@ -62,3 +62,7 @@ Panel v0.5.0: 42 Python tests (16 converter, 14 HTTPS/API, 12 PingCheck). Edge a
 ## v0.6.0
 
 45 Python tests; service regressions cover rename, persistence on startup, NDMS rejection retaining the old name and autostart disable without stopping. Edge checks cover status, button states, independent autostart, rename, RU/EN and mobile width. Firmware is simulated; new features have not been tested on physical hardware.
+
+## v0.7.0
+
+48 Python tests; service regressions cover a third tunnel, unchanged neighbours, duplicate-key rejection, pause during import/startup, retryable deletion failures, reserved deleted indexes and independent startup after global stop. Edge: minimal overview, scoped replacement, second-tunnel creation, PingCheck, pause/start/delete, RU/EN and mobile layout. Firmware is simulated; real concurrent tunnels on NC-1012 have not been verified.

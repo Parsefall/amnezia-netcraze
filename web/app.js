@@ -8,57 +8,84 @@ Object.assign(en,{pingInterface:'VPN interface',pingDefaults:'These are recommen
 Object.assign(ru,{pingConfirm:'Заменить настройки PingCheck для ',pingSaveConfirm:'Сохранить всю текущую конфигурацию роутера, включая изменения вне этой панели?',pingNone:'Нет управляемого VPN-интерфейса. Сначала запустите VPN.'});
 Object.assign(en,{connected:'Connected',disconnected:'Disconnected',unverified:'Connection not verified',partial:'Some tunnels unavailable',rename:'Rename',renamePrompt:'Display name (1–64 Latin letters, digits, spaces, dot, dash or underscore). Profile filename stays unchanged:',profileId:'Profile file: ',checkNeeded:'Enable PingCheck in Diagnostics to verify connectivity.'});
 Object.assign(ru,{connected:'Подключено',disconnected:'Отключено',unverified:'Связь не проверена',partial:'Часть туннелей недоступна',rename:'Переименовать',renamePrompt:'Отображаемое имя (1–64: латиница, цифры, пробелы, точка, дефис или подчёркивание). Имя файла профиля не меняется:',profileId:'Файл профиля: ',checkNeeded:'Для проверки связи включите PingCheck в разделе «Диагностика».'});
-const original = new Map([...document.querySelectorAll('[data-i18n]')].map(el => [el,el.textContent]));
-const t = key => (lang === 'en' ? en[key] : ru[key]) || key;
-function translate(){document.documentElement.lang=lang;$('language').textContent=lang==='ru'?'EN':'RU';for(const [el,text] of original)el.textContent=lang==='en'?(en[el.dataset.i18n]||text):text;if(state)render(state);}
-function notice(text,error=false){$('notice').textContent=text;$('notice').classList.toggle('error',error);$('notice').hidden=false;}
-function signedIn(yes){$('login').hidden=yes;$('dashboard').hidden=!yes;$('logout').hidden=!yes;if(!yes){csrf='';state=null;$('profile-key').value='';$('profile-file').value='';$('current-password').value='';$('new-password').value='';$('repeat-password').value='';}}
-async function api(path,data){const response=await fetch(path,{method:data?'POST':'GET',credentials:'same-origin',headers:data?{'Content-Type':'application/json','X-CSRF-Token':csrf}:{},body:data?JSON.stringify(data):undefined,cache:'no-store'});const result=await response.json();if(!response.ok){if(response.status===401)signedIn(false);throw new Error(result.error||t('error'));}return result;}
-async function perform(fn){if(busy)return;busy=true;document.querySelectorAll('button,input,textarea,select').forEach(el=>el.disabled=true);try{await fn();}catch(error){notice(error.message||t('error'),true);}finally{busy=false;document.querySelectorAll('button,input,textarea,select').forEach(el=>el.disabled=false);updateButtons();}}
-function bytes(n){for(const unit of ['B','KiB','MiB','GiB','TiB']){if(n<1024||unit==='TiB')return `${n.toFixed(n<10?1:0)} ${unit}`;n/=1024;}}
+Object.assign(en,{journal:'Log',addTunnel:'Add tunnel',close:'Close',displayName:'Tunnel name',nameRules:'Latin letters, digits, spaces, dot, dash or underscore. The profile filename stays unchanged.',deleteTunnel:'Delete tunnel',deleteHint:'The tunnel will be stopped and removed. A private backup remains on the router. Save router configuration after deletion.',deleteConfirm:'Delete this tunnel and its firmware interface? ',targetHint:'Replacement affects only the selected tunnel. New tunnels need a unique Latin name.',empty:'No tunnels yet. Add one on the Tunnels tab.',checkNeeded:'Enable PingCheck in this tunnel’s settings to verify connectivity.',tunnelSettings:'Tunnel settings',replaceKey:'Replace VPN key',createStart:'Create and start',tunnelStart:'Start',tunnelPause:'Pause',newHint:'Use a separate Amnezia client key for every tunnel. Routes and device policies are configured in Netcraze.',needsInterface:'Start this tunnel once to configure its name and PingCheck.'});
+Object.assign(ru,{journal:'Журнал',addTunnel:'Добавить туннель',close:'Закрыть',displayName:'Название туннеля',nameRules:'Латиница, цифры, пробелы, точка, дефис или подчёркивание. Имя файла профиля не меняется.',deleteTunnel:'Удалить туннель',deleteConfirm:'Удалить этот туннель и его интерфейс в прошивке? ',empty:'Туннелей пока нет. Добавьте первый во вкладке «Туннели».',checkNeeded:'Для проверки связи включите PingCheck в настройках этого туннеля.',tunnelSettings:'Настройки туннеля',replaceKey:'Заменить ключ VPN',createStart:'Создать и запустить',tunnelStart:'Запустить',tunnelPause:'Приостановить',newHint:'Отдельный клиентский ключ Amnezia для каждого туннеля. Маршруты и политики устройств задаются в Netcraze.',needsInterface:'Сначала запустите туннель, чтобы настроить имя и PingCheck.'});
+const original=new Map([...document.querySelectorAll('[data-i18n]')].map(el=>[el,el.textContent]));
+const t=key=>(lang==='en'?en[key]:ru[key])||key;
+let selected=null,creating=false;
 function node(tag,text,cls){const el=document.createElement(tag);if(text!==undefined)el.textContent=text;if(cls)el.className=cls;return el;}
+function notice(text,error=false){$('notice').textContent=text;$('notice').classList.toggle('error',error);$('notice').hidden=false;}
+function showView(id){document.querySelectorAll('.view').forEach(el=>el.hidden=el.id!==id);document.querySelectorAll('.tab').forEach(el=>el.classList.toggle('active',el.dataset.view===id));}
+function closeEditor(){selected=null;creating=false;$('tunnel-editor').hidden=true;$('profile-key').value='';$('profile-file').value='';}
+function current(){return state?.tunnels.find(x=>x.profile===selected);}
+function signedIn(yes){$('login').hidden=yes;$('dashboard').hidden=!yes;$('logout').hidden=!yes;if(!yes){csrf='';state=null;closeEditor();for(const id of ['current-password','new-password','repeat-password'])$(id).value='';}}
+async function api(path,data){const response=await fetch(path,{method:data?'POST':'GET',credentials:'same-origin',headers:data?{'Content-Type':'application/json','X-CSRF-Token':csrf}:{},body:data?JSON.stringify(data):undefined,cache:'no-store'});const result=await response.json();if(!response.ok){if(response.status===401)signedIn(false);throw Error(result.error||t('error'));}return result;}
+async function perform(fn){if(busy)return;busy=true;updateButtons();try{await fn();}catch(error){notice(error.message||t('error'),true);try{await refresh();}catch{}}finally{busy=false;updateButtons();}}
 function updateButtons(){
+ document.querySelectorAll('button,input,textarea,select').forEach(el=>el.disabled=busy);
  if(!state)return;
- const rules={up:state.running,stop:!state.running&&!state.started,enable:state.enabled,disable:!state.enabled};
- for(const [action,disabled] of Object.entries(rules))document.querySelector('[data-action="'+action+'"]').disabled=busy||state.busy||disabled;
+ const rules={up:state.running,stop:!state.started,enable:state.enabled,disable:!state.enabled};
+ for(const [action,disabled] of Object.entries(rules)){const el=document.querySelector('[data-action="'+action+'"]');if(el)el.disabled=busy||state.busy||disabled;}
+ for(const el of document.querySelectorAll('[data-tunnel-action]')){const tunnel=state.tunnels.find(x=>x.profile===el.dataset.name);el.disabled=busy||state.busy||!tunnel||(el.dataset.tunnelAction==='tunnel-up'?tunnel.active:(!state.started||tunnel.paused||tunnel.stopped));}
 }
-function render(s){renderPingInterfaces(s);updateButtons();
- const connections=s.tunnels.map(tunnel=>tunnel.connection);
- const connection=!connections.length||connections.every(x=>x==='disconnected')?'disconnected':connections.every(x=>x==='connected')?'connected':connections.some(x=>x==='unverified')?'unverified':'partial';
- $('connection-state').textContent=t(connection);$('connection-state').classList.toggle('status-off',connection!=='connected');$('enabled-state').textContent=t(s.enabled?'enabled':'disabled');$('watchdog-state').textContent=t(s.watchdog?'enabled':'disabled');$('pingcheck').textContent=s.pingcheck;$('updated').textContent=t('updated')+new Date().toLocaleTimeString(lang);$('tunnel-list').replaceChildren();if(!s.tunnels.length)$('tunnel-list').append(node('p',t('empty'),'muted'));for(const tunnel of s.tunnels){const card=node('article',undefined,'card');card.append(node('div','Amnezia VPN · '+tunnel.interface,'eyebrow'),node('h2',tunnel.name||tunnel.profile),node('span',t(tunnel.connection),'tag'+(tunnel.connection!=='connected'?' off':'')));
-if(tunnel.connection==='unverified')card.append(node('p',t('checkNeeded'),'caption'));
-const rename=node('button',t('rename'));rename.disabled=busy;
-rename.addEventListener('click',()=>{const label=prompt(t('renamePrompt'),tunnel.name||tunnel.profile);if(label===null)return;perform(async()=>{const result=await api('/api/action',{action:'rename',name:tunnel.profile,label:label.trim()});notice(result.message);await refresh();});});
-card.append(node('p',t('profileId')+tunnel.profile+'.conf','caption'),rename);const metrics=node('div',undefined,'metrics');for(const [label,value] of [['handshake',tunnel.handshake?new Date(tunnel.handshake*1000).toLocaleString(lang):t('never')],['received',bytes(tunnel.received)],['sent',bytes(tunnel.sent)]]){const metric=node('div',undefined,'metric');metric.append(node('strong',value),node('span',t(label)));metrics.append(metric);}card.append(metrics);$('tunnel-list').append(card);}
-$('profile-names').replaceChildren(...s.profiles.map(name=>{const option=node('option');option.value=name;return option;}));$('backup-list').replaceChildren();if(!s.backups.length)$('backup-list').append(node('p',t('noBackups'),'muted'));for(const backup of s.backups){const row=node('div',undefined,'backup-row'),info=node('div',backup.profile),button=node('button',t('restore'));info.append(node('small',new Date(backup.time*1000).toLocaleString(lang)));button.addEventListener('click',()=>{if(confirm(t('confirmRestore')+backup.id))perform(async()=>{const result=await api('/api/action',{action:'restore',backup:backup.id});notice(result.message);await refresh();});});row.append(info,button);$('backup-list').append(row);}}
+function translate(){document.documentElement.lang=lang;$('language').textContent=lang==='ru'?'EN':'RU';for(const [el,text] of original)el.textContent=lang==='en'?(en[el.dataset.i18n]||text):text;if(state)render(state);}
+function bytes(n){for(const unit of ['B','KiB','MiB','GiB','TiB']){if(n<1024||unit==='TiB')return `${n.toFixed(n<10?1:0)} ${unit}`;n/=1024;}}
+function statusTag(tunnel){return node('span',t(tunnel.connection),'tag'+(tunnel.connection!=='connected'?' off':''));}
+function openEditor(name){
+ closeEditor();selected=name;creating=name===null;$('tunnel-editor').hidden=false;showView('tunnels');
+ $('profile-name').value=creating?'':name;$('profile-name').readOnly=!creating;
+ $('tunnel-label').value=current()?.name||name||'';
+ for(const [id,value] of [['ping-host','1.1.1.1'],['ping-interval','10'],['ping-timeout','3'],['ping-fails','3'],['ping-success','2']])$(id).value=value;
+ renderEditor();$('tunnel-editor').scrollIntoView({behavior:'smooth',block:'start'});
+}
+function renderEditor(){
+ if($('tunnel-editor').hidden)return;
+ const tunnel=current();if(!creating&&!tunnel){closeEditor();return;}
+ $('editor-title').textContent=creating?t('addTunnel'):t('tunnelSettings')+' · '+tunnel.name;
+ $('rename-card').hidden=creating||!tunnel?.interface;$('ping-settings').hidden=creating||!tunnel?.interface;$('delete-card').hidden=creating;
+ $('profile-settings').querySelector('h2').textContent=creating?t('addTunnel'):t('replaceKey');
+ $('import-form').querySelector('button').textContent=creating?t('createStart'):t('apply');
+ $('profile-settings').querySelectorAll('.card')[1].hidden=creating;
+ $('ping-interface').value=tunnel?.interface||'';
+ $('ping-target').textContent=tunnel?`${tunnel.name} · ${tunnel.interface||'—'}`:'';
+ $('pingcheck').textContent=tunnel?`${tunnel.interface||'—'}: ${t(tunnel.connection)}`:'—';
+ $('backup-list').replaceChildren();const backups=state.backups.filter(x=>x.profile===selected);
+ if(!backups.length)$('backup-list').append(node('p',t('noBackups'),'caption'));
+ for(const backup of backups){const row=node('div',undefined,'backup-row'),button=node('button',t('restore'));row.append(node('small',new Date(backup.time*1000).toLocaleString(lang)),button);button.onclick=()=>{if(confirm(t('confirmRestore')+tunnel.name))perform(async()=>{notice((await api('/api/action',{action:'restore',backup:backup.id})).message);await refresh();});};$('backup-list').append(row);}
+}
+function render(s){
+ $('enabled-state').textContent=t(s.enabled?'enabled':'disabled');$('watchdog-state').textContent=t(s.watchdog?'enabled':'disabled');$('connection-state').textContent=t(s.tunnels.length&&s.tunnels.every(x=>x.connection==='connected')?'connected':s.tunnels.some(x=>x.connection==='unverified')?'unverified':s.tunnels.some(x=>x.connection==='connected')?'partial':'disconnected');$('updated').textContent=t('updated')+new Date().toLocaleTimeString(lang);
+ $('overview-list').replaceChildren();$('tunnel-list').replaceChildren();
+ if(!s.tunnels.length){$('overview-list').append(node('p',t('empty'),'muted'));$('tunnel-list').append(node('p',t('empty'),'muted'));}
+ for(const tunnel of s.tunnels){
+  const minimal=node('article',undefined,'card minimal-tunnel');minimal.append(node('h2',tunnel.name),statusTag(tunnel));$('overview-list').append(minimal);
+  const card=node('article',undefined,'card'),heading=node('div',undefined,'tunnel-heading'),gear=node('button','⚙','gear');gear.setAttribute('aria-label',t('tunnelSettings')+' '+tunnel.name);gear.title=t('tunnelSettings');gear.onclick=()=>openEditor(tunnel.profile);heading.append(node('h2',tunnel.name),gear);card.append(heading,statusTag(tunnel),node('p',tunnel.interface||t('needsInterface'),'caption'));
+  const controls=node('div',undefined,'buttons');for(const [action,label] of [['tunnel-up','tunnelStart'],['tunnel-down','tunnelPause']]){const button=node('button',t(label));button.dataset.tunnelAction=action;button.dataset.name=tunnel.profile;button.onclick=()=>perform(async()=>{notice((await api('/api/action',{action,name:tunnel.profile})).message);await refresh();});controls.append(button);}card.append(controls);
+  const metrics=node('div',undefined,'metrics');for(const [label,value] of [['handshake',tunnel.handshake?new Date(tunnel.handshake*1000).toLocaleString(lang):t('never')],['received',bytes(tunnel.received)],['sent',bytes(tunnel.sent)]]){const metric=node('div',undefined,'metric');metric.append(node('strong',value),node('span',t(label)));metrics.append(metric);}card.append(metrics);$('tunnel-list').append(card);
+ }
+ renderEditor();updateButtons();
+}
 async function refresh(){if(!csrf)return;state=await api('/api/status');render(state);}
-$('language').addEventListener('click',()=>{lang=lang==='ru'?'en':'ru';localStorage.setItem('awg3-language',lang);translate();});
-$('login-form').addEventListener('submit',event=>{event.preventDefault();perform(async()=>{const password=$('password').value;$('password').value='';const result=await api('/api/login',{password});csrf=result.csrf;signedIn(true);$('notice').hidden=true;await refresh();if(state.profiles.length)$('profile-name').value=state.profiles[0];});});
-$('logout').addEventListener('click',()=>perform(async()=>{await api('/api/logout',{});signedIn(false);$('notice').hidden=true;}));
-$('refresh').addEventListener('click',()=>perform(refresh));
-for(const tab of document.querySelectorAll('[data-view]'))tab.addEventListener('click',()=>{document.querySelectorAll('.view').forEach(el=>el.hidden=el.id!==tab.dataset.view);document.querySelectorAll('.tab').forEach(el=>el.classList.toggle('active',el===tab));});
-for(const button of document.querySelectorAll('[data-action]'))button.addEventListener('click',()=>{if(!confirm(t('confirm')+button.textContent))return;perform(async()=>{notice(t('working'));const result=await api('/api/action',{action:button.dataset.action});notice(result.message||t('success'));await refresh();});});
-$('import-form').addEventListener('submit',event=>{event.preventDefault();const file=$('profile-file').files[0],key=$('profile-key').value.trim(),name=$('profile-name').value.trim();if(Boolean(file)===Boolean(key)){notice(t('choose'),true);return;}if(file&&file.size>4*1024*1024){notice(t('size'),true);return;}if(!confirm(t('confirmImport')+name))return;perform(async()=>{const raw=file?new Uint8Array(await file.arrayBuffer()):new TextEncoder().encode(key);if(raw.length>4*1024*1024)throw Error(t('size'));let binary='';for(let n=0;n<raw.length;n+=8192)binary+=String.fromCharCode(...raw.subarray(n,n+8192));notice(t('working'));const result=await api('/api/action',{action:'import',name,data:btoa(binary)});$('profile-key').value='';$('profile-file').value='';notice(result.message||t('success'));await refresh();});});
-$('load-log').addEventListener('click',()=>perform(async()=>{$('service-log').textContent=(await api('/api/log')).log||'—';}));
-$('password-form').addEventListener('submit',event=>{event.preventDefault();if($('new-password').value!==$('repeat-password').value){notice(t('mismatch'),true);return;}perform(async()=>{const result=await api('/api/password',{current:$('current-password').value,password:$('new-password').value});signedIn(false);notice(result.message);});});
-function renderPingInterfaces(s){
- const select=$('ping-interface'),current=select.value;
- const options=s.tunnels.map(tunnel=>{const option=node('option',(tunnel.name||tunnel.profile)+' · '+tunnel.interface);option.value=tunnel.interface;return option;});
- if(!options.length){const option=node('option',t('pingNone'));option.value='';options.push(option);}
- select.replaceChildren(...options);
- if(s.tunnels.some(tunnel=>tunnel.interface===current))select.value=current;
-}
-$('ping-form').addEventListener('submit',event=>{
- event.preventDefault();const iface=$('ping-interface').value;if(!iface){notice(t('pingNone'),true);return;}
- if(!confirm(t('pingConfirm')+iface+'?'))return;
- const body={action:'pingcheck-apply',interface:iface,host:$('ping-host').value.trim(),'update-interval':Number($('ping-interval').value),timeout:Number($('ping-timeout').value),'max-fails':Number($('ping-fails').value),'min-success':Number($('ping-success').value)};
- perform(async()=>{const result=await api('/api/action',body);notice(result.message);await refresh();});
-});
-$('ping-disable').addEventListener('click',()=>{
- const iface=$('ping-interface').value;if(!iface){notice(t('pingNone'),true);return;}
- if(confirm(t('confirm')+$('ping-disable').textContent+' · '+iface+'?'))perform(async()=>{const result=await api('/api/action',{action:'pingcheck-disable',interface:iface});notice(result.message);await refresh();});
-});
-$('ping-save').addEventListener('click',()=>{if(confirm(t('pingSaveConfirm')))perform(async()=>{const result=await api('/api/action',{action:'pingcheck-save'});notice(result.message);});});
+$('language').onclick=()=>{lang=lang==='ru'?'en':'ru';localStorage.setItem('awg3-language',lang);translate();};
+$('login-form').onsubmit=event=>{event.preventDefault();perform(async()=>{const password=$('password').value;$('password').value='';csrf=(await api('/api/login',{password})).csrf;signedIn(true);$('notice').hidden=true;await refresh();});};
+$('logout').onclick=()=>perform(async()=>{await api('/api/logout',{});signedIn(false);$('notice').hidden=true;});
+$('refresh').onclick=()=>perform(refresh);
+for(const tab of document.querySelectorAll('[data-view]'))tab.onclick=()=>showView(tab.dataset.view);
+for(const button of document.querySelectorAll('[data-action]'))button.onclick=()=>{if(confirm(t('confirm')+button.textContent))perform(async()=>{notice((await api('/api/action',{action:button.dataset.action})).message);await refresh();});};
+$('new-tunnel').onclick=()=>openEditor(null);$('close-editor').onclick=closeEditor;
+$('rename-form').onsubmit=event=>{event.preventDefault();const name=selected,label=$('tunnel-label').value.trim();if(!name)return;perform(async()=>{notice((await api('/api/action',{action:'rename',name,label})).message);await refresh();});};
+$('import-form').onsubmit=event=>{
+ event.preventDefault();const file=$('profile-file').files[0],key=$('profile-key').value.trim(),name=creating?$('profile-name').value.trim():selected,action=creating?'create':'import';
+ if(!name)return;if(Boolean(file)===Boolean(key)){notice(t('choose'),true);return;}if(file&&file.size>4*1024*1024){notice(t('size'),true);return;}
+ if(!confirm(t('confirmImport')+name))return;
+ perform(async()=>{const raw=file?new Uint8Array(await file.arrayBuffer()):new TextEncoder().encode(key);if(raw.length>4*1024*1024)throw Error(t('size'));let binary='';for(let n=0;n<raw.length;n+=8192)binary+=String.fromCharCode(...raw.subarray(n,n+8192));const result=await api('/api/action',{action,name,data:btoa(binary)});$('profile-key').value='';$('profile-file').value='';notice(result.message);await refresh();openEditor(name);});
+};
+$('delete-tunnel').onclick=()=>{const tunnel=current();if(!tunnel||!confirm(t('deleteConfirm')+tunnel.name))return;perform(async()=>{notice((await api('/api/action',{action:'delete',name:tunnel.profile})).message);closeEditor();await refresh();});};
+$('load-log').onclick=()=>perform(async()=>{$('service-log').textContent=(await api('/api/log')).log||'—';});
+$('password-form').onsubmit=event=>{event.preventDefault();if($('new-password').value!==$('repeat-password').value){notice(t('mismatch'),true);return;}perform(async()=>{const result=await api('/api/password',{current:$('current-password').value,password:$('new-password').value});signedIn(false);notice(result.message);});};
+$('ping-form').onsubmit=event=>{event.preventDefault();const iface=current()?.interface;if(!iface)return;if(!confirm(t('pingConfirm')+current().name+'?'))return;const body={action:'pingcheck-apply',interface:iface,host:$('ping-host').value.trim(),'update-interval':Number($('ping-interval').value),timeout:Number($('ping-timeout').value),'max-fails':Number($('ping-fails').value),'min-success':Number($('ping-success').value)};perform(async()=>{notice((await api('/api/action',body)).message);await refresh();});};
+$('ping-disable').onclick=()=>{const iface=current()?.interface;if(iface&&confirm(t('confirm')+$('ping-disable').textContent))perform(async()=>{notice((await api('/api/action',{action:'pingcheck-disable',interface:iface})).message);await refresh();});};
+$('firmware-save').onclick=$('ping-save').onclick=()=>{if(confirm(t('pingSaveConfirm')))perform(async()=>notice((await api('/api/action',{action:'pingcheck-save'})).message));};
 translate();
-(async()=>{try{csrf=(await api('/api/session')).csrf;signedIn(true);await refresh();if(state.profiles.length)$('profile-name').value=state.profiles[0];}catch{signedIn(false);}})();
+(async()=>{try{csrf=(await api('/api/session')).csrf;signedIn(true);await refresh();}catch{signedIn(false);}})();
 setInterval(()=>{if(csrf&&!busy&&!document.hidden)refresh().catch(error=>notice(error.message,true));},15000);

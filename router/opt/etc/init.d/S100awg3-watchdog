@@ -25,6 +25,8 @@ check() (
         case "$idx" in [0-9]|[1-9][0-9]) ;; *) exit 1;; esac
         [ "$ndms" = "OpkgTun$idx" ] || exit 1
         [ -f "$src" ] || continue
+        name=${src##*/}; name=${name%.conf}
+        [ ! -f "$BASE/paused/$name" ] && [ ! -f "$RUN/stopped-$idx" ] || continue
         # Handshake age is informational, not proof of a failed idle tunnel.
         if ! "$AWG" show "opkgtun$idx" >/dev/null 2>&1; then
             now=$(date +%s)

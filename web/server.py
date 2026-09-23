@@ -177,7 +177,7 @@ class Application:
                 path, idx, ndms = fields
                 if not re.fullmatch(r'(0|[1-9][0-9]?)', idx) or ndms != 'OpkgTun'+idx: continue
                 name = Path(path).stem
-                if not NAME.fullmatch(name) or Path(path) != self.base/'conf'/(name+'.conf'): continue
+                if not NAME.fullmatch(name) or Path(path) != self.base/'conf'/(name+'.conf') or name not in self.profiles(): continue
                 rc, hs = self.runner([AWG, 'show', 'opkgtun'+idx, 'latest-handshakes'], 5)
                 received = sent = handshake = 0
                 if not rc:
@@ -192,6 +192,11 @@ class Application:
                                 received += int(pieces[1]); sent += int(pieces[2])
                 tunnels.append({'profile': name, 'interface': ndms, 'engine': rc == 0,
                                 'handshake': handshake, 'received': received, 'sent': sent})
+        mapped = {tunnel['profile'] for tunnel in tunnels}
+        for name in self.profiles():
+            if name not in mapped:
+                tunnels.append({'profile':name, 'interface':None, 'engine':False,
+                                'handshake':0, 'received':0, 'sent':0})
         backups = []
         for path in sorted((self.base/'backups/imports').glob('*'), key=lambda p:p.stat().st_mtime, reverse=True)[:50]:
             name, _, suffix = path.name.rpartition('.')
@@ -202,12 +207,15 @@ class Application:
         started = (self.runpath/'running').exists()
         for tunnel in tunnels:
             check = checks.get(tunnel['interface'], 'unknown')
-            tunnel['connection'] = ('disconnected' if not started or not tunnel['engine'] or check == 'fail'
+            tunnel['paused'] = (self.base/'paused'/tunnel['profile']).exists()
+            tunnel['stopped'] = bool(tunnel['interface'] and (self.runpath/('stopped-'+tunnel['interface'][7:])).exists())
+            tunnel['active'] = started and tunnel['engine'] and not tunnel['paused'] and not tunnel['stopped']
+            tunnel['connection'] = ('disconnected' if not tunnel['active'] or check == 'fail'
                                     else 'connected' if check == 'pass' else 'unverified')
             label = self.base/'names'/tunnel['profile']
             text = label.read_text().strip() if label.is_file() and not label.is_symlink() else ''
             tunnel['name'] = text if re.fullmatch(r'[A-Za-z0-9_. -]{1,64}', text) else tunnel['profile']
-        active = started and any(tunnel['engine'] for tunnel in tunnels)
+        active = any(tunnel['active'] for tunnel in tunnels)
         return {'running': active, 'started': started, 'profiles': self.profiles(), 'tunnels': tunnels, 'backups': backups,
                 'enabled': (self.base/'enabled').exists(),
                 'watchdog': (self.base/'watchdog-enabled').exists(),
@@ -325,6 +333,11 @@ class Application:
                 return self.pingcheck_action(body)
             if action in ('up','stop','enable','disable'):
                 args = [SERVICE, action]
+            elif action in ('tunnel-up', 'tunnel-down', 'delete'):
+                name = body.get('name')
+                if not isinstance(name, str) or name not in self.profiles():
+                    raise PanelError(400, 'Unknown tunnel.')
+                args = [SERVICE, action, name]
             elif action == 'rename':
                 name, label = body.get('name'), body.get('label')
                 if (not isinstance(name, str) or name not in self.profiles()
@@ -343,7 +356,7 @@ class Application:
                 if path.is_symlink() or not path.is_file() or name not in self.profiles():
                     raise PanelError(400, 'Backup or target profile not found.')
                 args = [SERVICE, 'import', str(path), name]
-            elif action == 'import':
+            elif action in ('import', 'create'):
                 name, encoded = body.get('name', ''), body.get('data', '')
                 if not isinstance(name, str) or not NAME.fullmatch(name) or name.endswith('.conf') or not isinstance(encoded, str):
                     raise PanelError(400, 'Invalid profile name or file.')
@@ -355,7 +368,7 @@ class Application:
                     path = Path(folder)/'input.vpn'
                     with path.open('xb') as out: out.write(data)
                     os.chmod(path, 0o600)
-                    return self.run_action([SERVICE, 'import', str(path), name])
+                    return self.run_action([SERVICE, action, str(path), name])
             else: raise PanelError(400, 'Unknown action.')
             return self.run_action(args)
         finally:

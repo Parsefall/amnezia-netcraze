@@ -91,3 +91,15 @@ ndmc -c "show ping-check"
 - A manually configured route to the old Endpoint is not updated. Confirm the new server is reached through the ISP, especially with VPN-first routing: `ip -4 route get NEW_IP`. Automatic endpoint-exception management is not implemented.
 
 For manual rollback, copy the desired private backup to `/opt/tmp/old.conf`, then run `/opt/etc/init.d/S99awg3 import /opt/tmp/old.conf router`, using the correct profile name. Explicit import also accepts native `.conf`; the inbox only processes `.vpn` and `.txt`.
+
+## v0.7.0 CLI
+
+```sh
+/opt/etc/init.d/S99awg3 create /opt/tmp/new.vpn second
+/opt/etc/init.d/S99awg3 tunnel-down second
+/opt/etc/init.d/S99awg3 import /opt/tmp/replacement.vpn second
+/opt/etc/init.d/S99awg3 tunnel-up second
+/opt/etc/init.d/S99awg3 delete second
+```
+
+`create` creates and starts a separate tunnel; `import` replaces a profile. Pause persists across reboot. `delete` preserves a private backup and removes the selected interface; save firmware configuration separately afterwards. See [multiple tunnels](WEB.en.md#multiple-tunnels-v070).
