@@ -15,3 +15,7 @@ __pycache__/
 # Local converter inputs and outputs
 *.vpn
 /router.conf
+
+# Router panel credentials and certificates
+/router/opt/etc/awg3/web/
+*.pem

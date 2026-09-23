@@ -2,6 +2,12 @@
 
 [Русский](CHANGELOG.md) | **English**
 
+## 0.4.0
+
+An optional [web panel runs on the router](docs/WEB.en.md): import files/keys, control VPN, view status and restore backups in a browser.
+
+Separate HTTPS service, password login, configured LAN subnet, RU/EN. 14 HTTPS/API tests and mocked-router browser checks passed. Physical NC-1012 installation and resource measurements remain pending.
+
 ## 0.3.0
 
 You can import `.vpn` or a key in `.txt` **directly on the router**, then rotate profiles by uploading to its inbox. See [router import and update](docs/ROUTER-IMPORT.en.md).

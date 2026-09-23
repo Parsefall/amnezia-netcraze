@@ -8,6 +8,9 @@ import tarfile
 
 root = Path(__file__).resolve().parent.parent
 names = [
+    "web/server.py", "web/index.html", "web/app.js", "web/style.css",
+    "router/install-web.sh", "router/opt/etc/init.d/S101awg3-web",
+    "docs/WEB.md", "docs/WEB.en.md",
     "tools/convert_profile.py", "tools/converter_gui.py", "convert-profile.cmd",
     "docs/CONVERTER.md", "docs/CONVERTER.en.md",
     "README.md", "INSTALL.md", "ARCHITECTURE.md", "VALIDATION.md",

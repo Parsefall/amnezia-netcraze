@@ -49,3 +49,8 @@ Not verified: IPv6, every combination of AWG parameters, long-term stability, th
 ## Router import v0.3.0
 
 16 Python tests; service tests cover stable interface/priority, DNS/MTU normalization, malformed-input rejection, rollback after engine rejection, inbox .part handling and one-time consumption, and stopped-service import. Engine and NDMS are mocked. The new import workflow and live script updater have not yet been tested on physical hardware.
+
+
+## Web panel v0.4.0
+
+14 HTTPS/API tests and mocked-router browser validation passed. Details and limits: [WEB.en.md](docs/WEB.en.md#validation-and-resource-use). Panel not yet installed on router; RSS/CPU unmeasured.

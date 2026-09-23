@@ -2,6 +2,8 @@
 
 [Русский](INSTALL.md) | **English**
 
+An optional [web panel runs on the router](docs/WEB.en.md): import files/keys, control VPN, view status and restore backups in a browser.
+
 You can import `.vpn` or a key in `.txt` **directly on the router**, then rotate profiles by uploading to its inbox. See [router import and update](docs/ROUTER-IMPORT.en.md).
 
 ## Prerequisites

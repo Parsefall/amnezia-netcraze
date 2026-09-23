@@ -1,0 +1,55 @@
+#!/bin/sh
+set -u
+umask 077
+PATH=/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin
+BASE=/opt/etc/awg3
+RUN=/var/run/awg3
+APP=/opt/lib/awg3/web/server.py
+PYTHON=/opt/bin/python3
+PIDFILE=$RUN/web.pid
+mkdir -p "$RUN" /opt/var/log
+alive() {
+    [ -f "$PIDFILE" ] || return 1
+    pid=$(cat "$PIDFILE")
+    case "$pid" in ''|*[!0-9]*) return 1;; esac
+    [ "$pid" -gt 1 ] && [ -r "/proc/$pid/cmdline" ] || return 1
+    tr '\000' '\n' < "/proc/$pid/cmdline" | grep -Fxq "$APP" || return 1
+    [ "$(readlink -f "/proc/$pid/exe")" = "$(readlink -f "$PYTHON")" ]
+}
+start() {
+    [ -f "$BASE/web-enabled" ] || return 0
+    alive && return 0
+    [ -s "$BASE/web/settings.json" ] || { echo 'Run web setup first'; return 1; }
+    if [ -f "$PIDFILE" ]; then
+        old=$(cat "$PIDFILE")
+        case "$old" in ''|*[!0-9]*) echo 'Invalid web PID record'; return 1;; esac
+        if [ "$old" -gt 1 ] && kill -0 "$old" 2>/dev/null; then echo 'Unverified process at recorded PID; inspect manually'; return 1; fi
+    fi
+    nohup "$PYTHON" "$APP" </dev/null >>/opt/var/log/awg3-web.log 2>&1 &
+    echo "$!" > "$PIDFILE"
+    sleep 2
+    alive || { echo 'Panel failed to start; see /opt/var/log/awg3-web.log'; return 1; }
+    echo 'HTTPS panel started'
+}
+stop() {
+    if alive; then
+        kill -TERM "$pid" || return 1
+        n=0
+        while alive && [ "$n" -lt 10 ]; do sleep 1; n=$((n+1)); done
+        alive && { echo 'Panel did not stop'; return 1; }
+    fi
+    rm -f "$PIDFILE"
+    return 0
+}
+mkdir "$RUN/web-service.lock" 2>/dev/null || { echo 'Web service busy'; exit 1; }
+trap 'rmdir "$RUN/web-service.lock"' EXIT
+trap 'exit 1' HUP INT TERM
+case "${1:-start}" in
+    start) start;;
+    stop) stop;;
+    restart) stop && start;;
+    enable) : > "$BASE/web-enabled"; start;;
+    disable) rm -f "$BASE/web-enabled"; stop;;
+    status) if alive; then echo "Panel running: $pid"; else echo 'Panel stopped'; exit 1; fi;;
+    *) echo "Usage: $0 {start|stop|restart|enable|disable|status}"; exit 1;;
+esac
