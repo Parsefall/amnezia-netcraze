@@ -15,6 +15,7 @@ jobs:
           sh tests/test_split_config.sh
           sh tests/test_parser_edge_cases.sh
           sh tests/test_service.sh
+          sh tests/test_web_service.sh
       - name: Offline converter tests
         run: python3 -m unittest discover -s tests -p test_converter.py -v
       - name: HTTPS panel tests

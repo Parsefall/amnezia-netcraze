@@ -2,6 +2,10 @@
 
 [Русский](CHANGELOG.md) | **English**
 
+## 0.4.1
+
+Fixed panel startup on Entware without nohup. A shell trap ignores SIGHUP before exec Python; credentials, TLS certificate and VPN are unchanged. Added Linux startup/idempotency/SIGHUP/stop regression coverage.
+
 ## 0.4.0
 
 An optional [web panel runs on the router](docs/WEB.en.md): import files/keys, control VPN, view status and restore backups in a browser.

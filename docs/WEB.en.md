@@ -2,7 +2,7 @@
 
 [Русский](WEB.md) | **English**
 
-The v0.4.0 panel runs **on the router itself** through Entware. A computer or phone only provides the browser. It has its own HTTPS address; it is not a card in Netcraze's built-in Applications page. Includes Russian and English UI.
+The v0.4.1 panel runs **on the router itself** through Entware. A computer or phone only provides the browser. It has its own HTTPS address; it is not a card in Netcraze's built-in Applications page. Includes Russian and English UI.
 
 Features: file/key import, existing-profile replacement, start/stop of the whole VPN service, autostart, watchdog/inbox, handshake timestamps, traffic counters, PingCheck view, filtered log, backup restore and panel password change. Routing, device policies and PingCheck configuration stay in the firmware UI.
 
@@ -10,7 +10,7 @@ Features: file/key import, existing-profile replacement, start/stop of the whole
 
 Requires Entware and Amnezia Netcraze. For a new router, first follow [VPN installation](../INSTALL.en.md); you can then import a profile through the panel. Prior hardware testing is limited to Netcraze Giga NC-1012, hw 1210C000, aarch64, NetcrazeOS 5.1.5, kernel 4.9-ndm-5. **The new web panel has not yet been tested on physical hardware.**
 
-1. Download `awg3-netcraze-arm64-userspace.tar.gz` from [v0.4.0](https://github.com/Parsefall/amnezia-netcraze/releases/tag/v0.4.0). In PC PowerShell from the download directory:
+1. Download `awg3-netcraze-arm64-userspace.tar.gz` from [v0.4.1](https://github.com/Parsefall/amnezia-netcraze/releases/tag/v0.4.1). In PC PowerShell from the download directory:
 
 ```powershell
 scp -O -P 22 .\awg3-netcraze-arm64-userspace.tar.gz root@192.168.1.1:/opt/tmp/
@@ -83,3 +83,8 @@ grep -E '^(Name|VmRSS|VmHWM|Threads):' /proc/$p/status
 ```
 
 The browser polls every 15 seconds only while visible. No CDN, analytics or remote assets. Backend runs as root to control VPN but only exposes fixed actions without shell/arbitrary command execution. Passwords use salted PBKDF2-SHA256 with 600000 iterations; HttpOnly/Secure/SameSite cookies, CSRF tokens, Host/Origin checks and TLS 1.2+ are used. This is not a claim of an independent security audit.
+
+
+## Fixing nohup: not found in 0.4.0
+
+Dependencies, password and certificate setup do not need repeating. Replace only `/opt/etc/init.d/S101awg3-web` with the 0.4.1 file, chmod 755 and enable it using the full path. Startup now uses shell builtins; nohup is not required. Router logs confirmed this issue on NC-1012; corrected hardware startup is awaiting confirmation.

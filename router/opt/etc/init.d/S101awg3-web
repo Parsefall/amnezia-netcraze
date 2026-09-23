@@ -25,7 +25,9 @@ start() {
         case "$old" in ''|*[!0-9]*) echo 'Invalid web PID record'; return 1;; esac
         if [ "$old" -gt 1 ] && kill -0 "$old" 2>/dev/null; then echo 'Unverified process at recorded PID; inspect manually'; return 1; fi
     fi
-    nohup "$PYTHON" "$APP" </dev/null >>/opt/var/log/awg3-web.log 2>&1 &
+    # POSIX shell ignores HUP before exec; no optional nohup applet required.
+    # exec keeps $! equal to the Python PID used by identity checks.
+    (trap '' HUP; exec "$PYTHON" "$APP") </dev/null >>/opt/var/log/awg3-web.log 2>&1 &
     echo "$!" > "$PIDFILE"
     sleep 2
     alive || { echo 'Panel failed to start; see /opt/var/log/awg3-web.log'; return 1; }
