@@ -2,6 +2,8 @@
 
 [Русский](INSTALL.md) | **English**
 
+You can import `.vpn` or a key in `.txt` **directly on the router**, then rotate profiles by uploading to its inbox. See [router import and update](docs/ROUTER-IMPORT.en.md).
+
 ## Prerequisites
 
 You need Entware, root access to its shell, storage mounted at `/opt`, and `/dev/net/tun`. See [README](README.en.md) for the tested model and firmware. This guide does not cover installing Entware itself.
@@ -13,6 +15,8 @@ Create a **separate client for the router** on your VPN server and export its Am
 Examples use `192.168.1.1` and SSH port **22**, as tested. Replace `22` if your Entware SSH server uses another port. SCP uses uppercase `-P`; SSH uses lowercase `-p`. The session must open a shell with a prompt such as `~ #`, not only the firmware CLI.
 
 ## 0. If you only have an Amnezia key
+
+For direct router import, complete installation steps 1–2 below, then [install Python and import the export](docs/ROUTER-IMPORT.en.md) instead of copying a native `.conf` in step 3. This also supports automatic future replacement. PC conversion below remains an alternative.
 
 If you have a **`.vpn` file or `vpn://…` key**, use the [offline converter](docs/CONVERTER.en.md): download the converter ZIP from the release, extract it, run `python tools/convert_profile.py --gui --lang en` (Python 3.10+ with tkinter required), select the file or paste the key, and save router.conf. Then proceed to step 1.
 

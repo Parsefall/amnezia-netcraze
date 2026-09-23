@@ -26,8 +26,8 @@ done
 chmod 755 "$PAYLOAD/awg" "$PAYLOAD/amneziawg-go"
 "$PAYLOAD/awg" --version
 "$PAYLOAD/amneziawg-go" --version
-mkdir -p "$BASE/conf/parsed" /opt/etc/init.d /opt/var/log /var/run/awg3
-chmod 700 "$BASE" "$BASE/conf" "$BASE/conf/parsed" /var/run/awg3
+mkdir -p "$BASE/inbox" /opt/lib/awg3 "$BASE/conf/parsed" /opt/etc/init.d /opt/var/log /var/run/awg3
+chmod 700 "$BASE/inbox" /opt/lib/awg3 "$BASE" "$BASE/conf" "$BASE/conf/parsed" /var/run/awg3
 mkdir /var/run/awg3/service.lock 2>/dev/null || { echo 'ERROR: service busy'; exit 1; }
 trap 'rmdir /var/run/awg3/service.lock' EXIT
 BACKUP=$BASE/backups/$(date +%Y%m%d-%H%M%S)-$$
@@ -47,6 +47,10 @@ for path in bin/awg bin/amneziawg-go bin/awg3-split-config etc/init.d/S99awg3 et
     chmod 755 "/opt/$path.new"
     mv -f "/opt/$path.new" "/opt/$path"
 done
+if [ -f /opt/lib/awg3/convert_profile.py ]; then cp -p /opt/lib/awg3/convert_profile.py "$BACKUP/convert_profile.py"; fi
+cp "$HERE/../tools/convert_profile.py" /opt/lib/awg3/convert_profile.py.new
+chmod 600 /opt/lib/awg3/convert_profile.py.new
+mv -f /opt/lib/awg3/convert_profile.py.new /opt/lib/awg3/convert_profile.py
 # Back up boot flags and leave the first run manual after every installation.
 for flag in enabled watchdog-enabled; do
     [ ! -f "$BASE/$flag" ] || cp -p "$BASE/$flag" "$BACKUP/$flag"

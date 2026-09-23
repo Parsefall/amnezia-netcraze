@@ -206,6 +206,14 @@ def convert(data, ipv4_only=False, profile_index=None):
     return prepare_native(extract_profile(decode_export(data), profile_index), ipv4_only)
 
 
+def router_profile(text):
+    # Routing and DNS stay under firmware control; reset absent MTU deterministically.
+    lines = [line for line in text.splitlines() if not line.startswith('DNS = ')]
+    if not any(line.startswith('MTU = ') for line in lines):
+        lines.insert(1, 'MTU = 1280')
+    return '\n'.join(lines) + '\n'
+
+
 def read_input(path):
     with Path(path).open('rb') as f:
         return f.read(MAX_INPUT + 1)
@@ -233,6 +241,7 @@ def main():
     parser.add_argument('--output', type=Path, default=Path('router.conf'))
     parser.add_argument('--ipv4-only', action='store_true', help='Explicitly remove IPv6 Address/DNS/routes')
     parser.add_argument('--profile-index', type=int)
+    parser.add_argument('--router-import', action='store_true', help='Keep firmware DNS and default missing MTU to 1280')
     parser.add_argument('--gui', action='store_true')
     parser.add_argument('--lang', choices=['ru','en'], default='ru', help='GUI language')
     args = parser.parse_args()
@@ -252,6 +261,8 @@ def main():
         else:
             data = read_input(args.input)
         text, removed = convert(data, args.ipv4_only, args.profile_index)
+        if args.router_import:
+            text = router_profile(text)
         save_private(args.output, text)
         print('Saved private .conf. Removed IPv6 entries:', removed)
         print('Source unchanged. Use this client profile on one device only.')

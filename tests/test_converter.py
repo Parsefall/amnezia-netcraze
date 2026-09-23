@@ -146,4 +146,15 @@ class ConverterTests(unittest.TestCase):
             self.assertNotIn(KEY1,result.stdout+result.stderr)
 
 
+
+class RouterNormalization(unittest.TestCase):
+    def test_firmware_dns_and_missing_mtu(self):
+        text = c.router_profile(NATIVE.replace('MTU = 1280\n', ''))
+        self.assertNotIn('DNS =', text)
+        self.assertEqual(text.count('MTU = 1280'), 1)
+        self.assertIn('PrivateKey = ' + KEY1, text)
+
+    def test_explicit_mtu_preserved(self):
+        self.assertIn('MTU = 1380', c.router_profile(NATIVE.replace('1280', '1380')))
+
 if __name__=='__main__': unittest.main()

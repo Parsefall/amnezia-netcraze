@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+TEST_PYTHON=$(command -v python3 || command -v python)
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
@@ -88,6 +89,75 @@ rm "$TMP/reject-awg"
 touch "$TMP/reject-ndms"
 if configure "$CONF/a.conf" 1 >/dev/null; then exit 1; fi
 rm "$TMP/reject-ndms"
+# Import through the real converter, with firmware/engine calls mocked.
+PYTHON=$TEST_PYTHON
+CONVERTER=$ROOT/tools/convert_profile.py
+cat > "$TMP/new.conf" <<'EOF'
+[Interface]
+Address = 10.8.0.4/32
+PrivateKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+DNS = 9.9.9.9
+[Peer]
+PublicKey = AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=
+AllowedIPs = 0.0.0.0/0
+Endpoint = 192.0.2.20:51820
+EOF
+cp "$STATE" "$TMP/state-before"
+: > "$TMP/calls"
+import_profile "$TMP/new.conf" b >/dev/null
+cmp "$STATE" "$TMP/state-before"
+grep -q 'Endpoint = 192.0.2.20' "$CONF/b.conf"
+grep -q 'MTU = 1280' "$CONF/b.conf"
+! grep -q '^DNS =' "$CONF/b.conf"
+! grep -Eq '(ip global|ip route|ip name-server|description|down)' "$TMP/calls"
+cp "$CONF/b.conf" "$TMP/accepted"
+cp "$TMP/calls" "$TMP/before"
+printf 'vpn://not-valid' > "$TMP/bad.txt"
+if import_profile "$TMP/bad.txt" b >/dev/null 2>&1; then exit 1; fi
+cmp "$CONF/b.conf" "$TMP/accepted"
+grep -v "show interface" "$TMP/calls" > "$TMP/mutations-after"
+grep -v "show interface" "$TMP/before" > "$TMP/mutations-before"
+cmp "$TMP/mutations-after" "$TMP/mutations-before"
+if import_profile "$TMP/new.conf" ../escape >/dev/null 2>&1; then exit 1; fi
+if import_profile "$TMP/new.conf" unknown >/dev/null 2>&1; then exit 1; fi
+# Simulate engine rejecting a new configuration while accepting rollback.
+cat > "$TMP/bin/awg" <<'EOF'
+#!/bin/sh
+if [ "$1" = setconf ] && grep -q '192.0.2.99:' "$3"; then exit 1; fi
+exit 0
+EOF
+sed 's/192.0.2.20:/192.0.2.99:/' "$TMP/new.conf" > "$TMP/rejected.conf"
+if import_profile "$TMP/rejected.conf" b > "$TMP/rejection"; then exit 1; fi
+grep -q 'previous configuration restored' "$TMP/rejection"
+cmp "$CONF/b.conf" "$TMP/accepted"
+# Incomplete uploads are ignored; complete files are consumed exactly once.
+mkdir -p "$BASE/inbox"
+cp "$TMP/new.conf" "$BASE/inbox/b.vpn.part"
+cp "$TMP/bad.txt" "$BASE/inbox/b.txt"
+scan_inbox >/dev/null 2>&1
+test -f "$BASE/inbox/b.vpn.part"
+test ! -f "$BASE/inbox/b.txt"
+grep -q rejected "$BASE"/inbox/item.*/result
+cp "$TMP/new.conf" "$BASE/inbox/b.vpn"
+scan_inbox >/dev/null
+test ! -f "$BASE/inbox/b.vpn"
+grep -q applied "$BASE"/inbox/item.*/result
+# A real encoded key in .txt traverses the complete inbox pipeline.
+"$PYTHON" -c 'import sys,json,zlib,base64; from pathlib import Path; native=Path(sys.argv[1]).read_text(); raw=json.dumps({"containers":[{"awg":{"last_config":json.dumps({"config":native})}}]}).encode(); Path(sys.argv[2]).write_text("vpn://"+base64.urlsafe_b64encode(len(raw).to_bytes(4,"big")+zlib.compress(raw)).decode().rstrip("="))' "$TMP/new.conf" "$BASE/inbox/b.txt"
+scan_inbox >/dev/null
+test ! -f "$BASE/inbox/b.txt"
+cmp "$CONF/b.conf" "$TMP/accepted"
+# Stop/import stores new credentials without bringing the service back up.
+stop_service >/dev/null
+: > "$TMP/calls"
+import_profile "$TMP/new.conf" b >/dev/null
+test ! -s "$TMP/calls"
+test ! -f "$RUN/running"
+# Existing interfaces retain firmware priority on later startup.
+: > "$TMP/calls"
+start_service >/dev/null
+! grep -q 'ip global auto' "$TMP/calls"
+
 # Removed source retains reserved ownership and never triggers broad cleanup.
 rm "$CONF/a.conf"
 start_service >/dev/null

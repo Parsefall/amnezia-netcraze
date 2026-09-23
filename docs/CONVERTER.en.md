@@ -2,6 +2,8 @@
 
 [Русский](CONVERTER.md) | **English**
 
+To avoid conversion on a PC, use [router import](ROUTER-IMPORT.en.md): it accepts .vpn or .txt and can automatically replace an existing profile.
+
 The converter runs **offline**. It extracts an existing AmneziaWG client profile from an Amnezia guest export. Secrets are not uploaded, printed to the console, or passed as command-line arguments.
 
 ## Easy Windows workflow

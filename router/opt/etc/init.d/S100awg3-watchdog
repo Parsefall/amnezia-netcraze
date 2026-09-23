@@ -20,6 +20,7 @@ alive() {
 check() (
     [ -f "$BASE/watchdog-enabled" ] && [ -f "$RUN/running" ] || exit 0
     [ -f "$BASE/managed.tsv" ] || exit 0
+    "$SERVICE" inbox || true
     while IFS="$(printf '\t')" read -r src idx ndms; do
         case "$idx" in [0-9]|[1-9][0-9]) ;; *) exit 1;; esac
         [ "$ndms" = "OpkgTun$idx" ] || exit 1

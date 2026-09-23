@@ -12,6 +12,8 @@ SOCKETS=/var/run/amneziawg
 AWG=/opt/bin/awg
 ENGINE=/opt/bin/amneziawg-go
 SPLIT=/opt/bin/awg3-split-config
+PYTHON=/opt/bin/python3
+CONVERTER=/opt/lib/awg3/convert_profile.py
 WATCHDOG=/opt/etc/init.d/S100awg3-watchdog
 LOG=/opt/var/log/awg3.log
 mkdir -p "$BASE" "$PARSED" "$RUN" /opt/var/log || exit 1
@@ -109,7 +111,9 @@ configure() (
     src=$1; idx=$2; iface=opkgtun$idx; ndms=OpkgTun$idx
     # Parse before modifying any existing interface.
     parse_profile "$src" "$idx" || exit 1
+    existing=0
     if ndms_exists "$ndms"; then
+        existing=1
         ndms_owned_type "$ndms" || { log "ERROR: unexpected NDMS interface type"; exit 1; }
     else
         ndms_cmd "interface $ndms" || exit 1
@@ -119,7 +123,11 @@ configure() (
     "$AWG" setconf "$iface" "$PARSED/$iface.awg.conf" >/dev/null 2>&1 || { log "ERROR: awg rejected $src"; exit 1; }
     name=${src##*/}; name=${name%.conf}
     ndms_cmd "interface $ndms description $name" || exit 1
-    sh "$PARSED/$iface.ndms.sh" || { log "ERROR: NDMS settings rejected for $ndms"; exit 1; }
+    if [ "$existing" -eq 1 ]; then
+        sed '/^ndmc -c "interface .* ip global auto"/d' "$PARSED/$iface.ndms.sh" > "$PARSED/$iface.existing.sh" || exit 1
+        settings=$PARSED/$iface.existing.sh
+    else settings=$PARSED/$iface.ndms.sh; fi
+    sh "$settings" || { log "ERROR: NDMS settings rejected for $ndms"; exit 1; }
     ip link set "$iface" up || exit 1
     log "$ndms configured; handshake must be checked with status"
 )
@@ -203,6 +211,78 @@ repair() (
     [ -n "$src" ] && [ -f "$src" ] || exit 1
     configure "$src" "$idx"
 )
+# Import keeps the existing NDMS object, priority, policies, routes and DNS.
+apply_import() (
+    src=$1; idx=$2
+    parse_profile "$src" "$idx" >/dev/null || exit 1
+    ndms_owned_type "OpkgTun$idx" && engine_alive "opkgtun$idx" || exit 1
+    "$AWG" setconf "opkgtun$idx" "$PARSED/opkgtun$idx.awg.conf" >/dev/null 2>&1 || exit 1
+    # DNS is router policy, not changed by automatic credential rotation.
+    sed '/^ndmc -c "ip name-server /d; /^ndmc -c "interface .* ip global auto"/d' \
+        "$PARSED/opkgtun$idx.ndms.sh" > "$PARSED/opkgtun$idx.import.sh" || exit 1
+    sh "$PARSED/opkgtun$idx.import.sh" || exit 1
+    ip link set "opkgtun$idx" up
+)
+import_profile() (
+    input=$1; name=$2
+    valid_source "$CONF/$name.conf" || { log 'ERROR: invalid import target'; exit 1; }
+    [ -f "$input" ] && [ ! -L "$input" ] || { log 'ERROR: import requires a regular file'; exit 1; }
+    [ -x "$PYTHON" ] && [ -f "$CONVERTER" ] || { log 'ERROR: install Python 3.10+ and importer first'; exit 1; }
+    target=$CONF/$name.conf
+    [ ! -L "$target" ] || exit 1
+    idx=
+    [ ! -f "$STATE" ] || idx=$(awk -F '\t' -v s="$target" '$1==s {print $2}' "$STATE")
+    # A running service only replaces an existing managed profile, never another tunnel.
+    if [ -f "$RUN/running" ]; then
+        [ -n "$idx" ] && [ -f "$target" ] || { log 'ERROR: target is not an existing managed profile'; exit 1; }
+        ndms_owned_type "OpkgTun$idx" && engine_alive "opkgtun$idx" || { log 'ERROR: target engine is unavailable'; exit 1; }
+    fi
+    stage=$(mktemp -d "$BASE/import.XXXXXX") || exit 1
+    trap 'rm -f "$stage/profile.conf" "$stage/opkgtun99.awg.conf" "$stage/opkgtun99.ndms.sh"; rmdir "$stage"' EXIT
+    # A private snapshot is bounded and parsed by the offline converter.
+    "$PYTHON" "$CONVERTER" --input "$input" --output "$stage/profile.conf" --ipv4-only --router-import >/dev/null || { log "ERROR: export conversion rejected"; exit 1; }
+    AWG3_PARSED_DIR="$stage" "$SPLIT" "$stage/profile.conf" opkgtun99 OpkgTun99 >/dev/null || exit 1
+    backup=
+    if [ -f "$target" ]; then
+        mkdir -p "$BASE/backups/imports" || exit 1
+        backup=$(mktemp "$BASE/backups/imports/$name.XXXXXX") || exit 1
+        cp -p "$target" "$backup" || exit 1
+    fi
+    mv -f "$stage/profile.conf" "$target" || exit 1
+    if [ -f "$RUN/running" ]; then
+        if ! apply_import "$target" "$idx"; then
+            cp -p "$backup" "$stage/profile.conf" && mv -f "$stage/profile.conf" "$target" || {
+                log 'ERROR: cannot restore profile file; inspect backups/imports'; exit 1;
+            }
+            if apply_import "$target" "$idx"; then log 'ERROR: import failed; previous configuration restored';
+            else log 'ERROR: import and live rollback failed; previous file restored, manual recovery required'; fi
+            exit 1
+        fi
+        log 'Profile replaced on existing interface; verify handshake and PingCheck. No firmware save performed.'
+    else
+        log 'Profile imported; service remains stopped. Use up to start.'
+    fi
+)
+scan_inbox() (
+    [ -d "$BASE/inbox" ] || exit 0
+    for input in "$BASE/inbox/"*.vpn "$BASE/inbox/"*.txt; do
+        [ -f "$input" ] && [ ! -L "$input" ] || continue
+        filename=${input##*/}; name=${filename%.*}
+        valid_source "$CONF/$name.conf" || continue
+        # Inbox is for replacement only, including before startup.
+        [ -f "$CONF/$name.conf" ] || continue
+        archive=$(mktemp -d "$BASE/inbox/item.XXXXXX") || exit 1
+        mv "$input" "$archive/source.${filename##*.}" || { rmdir "$archive"; continue; }
+        source=$archive/source.${filename##*.}
+        chmod 600 "$source"
+        if import_profile "$source" "$name"; then
+            printf '%s\n' "$filename applied; verify handshake" > "$archive/result"
+        else
+            printf '%s\n' "$filename rejected; inspect service log" > "$archive/result"
+        fi
+        # Keep the input privately for diagnosis; never retry a rejected file forever.
+    done
+)
 # Never steal a lock: after SIGKILL diagnose the PID before removing it manually.
 action=${1:-start}
 case "$action" in status) validate_state && status; exit $?;; esac
@@ -212,13 +292,15 @@ trap 'rm -f "$RUN/service.lock/pid"; rmdir "$RUN/service.lock"' EXIT
 trap 'exit 1' HUP INT TERM
 validate_state || { log 'ERROR: invalid managed.tsv; refusing network changes'; exit 1; }
 case "$action" in
-    start) [ -f "$BASE/enabled" ] || { echo 'Autostart disabled; use up for a manual test'; exit 0; }; start_service;;
+    start) [ -f "$BASE/enabled" ] || { echo 'Autostart disabled; use up for a manual test'; exit 0; }; scan_inbox && start_service;;
     up) start_service;;
     stop) stop_service;;
     restart) stop_service && start_service;;
+    import) import_profile "${2:-}" "${3:-router}";;
+    inbox) scan_inbox;;
     repair) repair "${2:-}";;
     enable) : > "$BASE/enabled"; echo 'Autostart enabled (does not start VPN)';;
     disable) rm -f "$BASE/enabled"; stop_service;;
     save) ndms_cmd 'system configuration save';;
-    *) echo "Usage: $0 {up|start|stop|restart|status|repair N|enable|disable|save}"; exit 1;;
+    *) echo "Usage: $0 {up|start|stop|restart|status|repair N|import FILE NAME|inbox|enable|disable|save}"; exit 1;;
 esac

@@ -2,6 +2,12 @@
 
 [Русский](CHANGELOG.md) | **English**
 
+## 0.3.0
+
+You can import `.vpn` or a key in `.txt` **directly on the router**, then rotate profiles by uploading to its inbox. See [router import and update](docs/ROUTER-IMPORT.en.md).
+
+Existing interface priority is preserved at startup. Import validates, backs up, and attempts rollback on apply errors. Added a script-only updater. Mocked-router tests passed; physical router validation pending.
+
 ## 0.2.0 — Amnezia profile converter
 
 - Offline .vpn/vpn:// to router.conf conversion, with RU/EN GUI and CLI.

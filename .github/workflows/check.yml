@@ -9,7 +9,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Shell syntax
         run: |
-          for f in router/install.sh router/uninstall.sh router/opt/bin/awg3-split-config router/opt/etc/init.d/S99awg3 router/opt/etc/init.d/S100awg3-watchdog; do sh -n "$f"; done
+          for f in router/update-importer.sh router/install.sh router/uninstall.sh router/opt/bin/awg3-split-config router/opt/etc/init.d/S99awg3 router/opt/etc/init.d/S100awg3-watchdog; do sh -n "$f"; done
       - name: Parser and service regressions
         run: |
           sh tests/test_split_config.sh

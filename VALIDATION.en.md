@@ -44,3 +44,8 @@ Not verified: IPv6, every combination of AWG parameters, long-term stability, th
 ## Converter 0.2.0
 
 14 automated tests with synthetic keys cover qCompress/Base64URL and JSON exports, AWG parameter preservation, explicit IPv6 handling, damaged and oversized input, multiple profiles, absent client configuration, private no-overwrite output, and CLI behavior. Converted output was also checked with the project's actual shell parser. The converter has not processed the user's real .vpn export yet; manual GUI testing has not been performed. VPN-engine and failover validation status is unchanged.
+
+
+## Router import v0.3.0
+
+16 Python tests; service tests cover stable interface/priority, DNS/MTU normalization, malformed-input rejection, rollback after engine rejection, inbox .part handling and one-time consumption, and stopped-service import. Engine and NDMS are mocked. The new import workflow and live script updater have not yet been tested on physical hardware.
