@@ -31,7 +31,7 @@ start() {
     echo "$!" > "$PIDFILE"
     sleep 2
     alive || { echo 'Panel failed to start; see /opt/var/log/awg3-web.log'; return 1; }
-    echo 'HTTPS panel started'
+    echo 'Web panel started'
 }
 stop() {
     if alive; then

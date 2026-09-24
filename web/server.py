@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local HTTPS control panel. No shell commands, remote assets or key downloads."""
+"""Local HTTP/HTTPS control panel. No shell commands, remote assets or key downloads."""
 import argparse
 import base64
 from collections import deque
@@ -128,6 +128,13 @@ def ping_states(output):
     return result
 
 
+def http_port(settings):
+    port = settings.get('http_port', 8089 if settings['port'] != 8089 else 8090)
+    if type(port) is not int or (port != 0 and not 1024 <= port <= 65535) or port == settings['port']:
+        raise ValueError('HTTP port must differ from HTTPS and be 1024–65535, or 0 to disable.')
+    return port
+
+
 class Application:
     def __init__(self, settings, base=BASE, runner=command, runpath=Path("/var/run/awg3")):
         self.settings, self.base, self.runner = settings, Path(base), runner
@@ -136,10 +143,12 @@ class Application:
         self.network = validate_network(settings['bind'], settings['network'], settings['port'])
         self.authority = settings['bind'] + ':' + str(settings['port'])
         self.origin = 'https://' + self.authority
+        self.http_port = http_port(settings)
+        self.slots = threading.BoundedSemaphore(8)
         self.sessions, self.failures = {}, deque()
         self.auth_lock, self.operation = threading.Lock(), threading.Lock()
 
-    def login(self, password):
+    def login(self, password, transport='https'):
         with self.auth_lock:
             now = time.monotonic()
             while self.failures and self.failures[0] < now - 60: self.failures.popleft()
@@ -151,19 +160,21 @@ class Application:
             self.sessions = {k:v for k,v in self.sessions.items() if v['expires'] > now}
             if len(self.sessions) >= 16: self.sessions.pop(next(iter(self.sessions)))
             token, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
-            self.sessions[token] = {'csrf': csrf, 'expires': now + 3600}
+            self.sessions[token] = {'csrf': csrf, 'expires': now + 3600, 'transport': transport}
             return token, csrf
 
-    def session(self, cookie):
+    def session(self, cookie, transport='https'):
         parsed = SimpleCookie()
         try: parsed.load(cookie or '')
         except Exception: raise PanelError(401, 'Login required.') from None
-        token = parsed.get('awg3_session')
+        token = parsed.get('awg3_session' if transport == 'https' else 'awg3_http_session')
         token = token.value if token else ''
         with self.auth_lock:
             record = self.sessions.get(token)
             if not record or record['expires'] <= time.monotonic():
                 self.sessions.pop(token, None)
+                raise PanelError(401, 'Login required.')
+            if record.get('transport', 'https') != transport:
                 raise PanelError(401, 'Login required.')
             return token, record['csrf']
 
@@ -429,13 +440,23 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
         self.close_connection = True
 
+    @property
+    def transport(self): return 'https' if self.server.context else 'http'
+
+    def session_cookie(self, token, age):
+        name = 'awg3_session' if self.transport == 'https' else 'awg3_http_session'
+        secure = '; Secure' if self.transport == 'https' else ''
+        return name+'='+token+'; Path=/; HttpOnly'+secure+'; SameSite=Strict; Max-Age='+str(age)
+
     def guard(self, mutation=False):
         try: allowed = ipaddress.ip_address(self.client_address[0]) in self.app.network
         except ValueError: allowed = False
         if not allowed: raise PanelError(403, 'Home LAN access only.')
-        if self.headers.get_all('Host') != [self.app.authority]:
+        authority = self.app.authority if self.transport == 'https' else self.server.server_address[0]+':'+str(self.server.server_port)
+        origin = self.app.origin if self.transport == 'https' else 'http://'+authority
+        if self.headers.get_all('Host') != [authority]:
             raise PanelError(403, 'Use the configured router IP and port.')
-        if mutation and self.headers.get_all('Origin') != [self.app.origin]:
+        if mutation and self.headers.get_all('Origin') != [origin]:
             raise PanelError(403, 'Same-origin request required.')
 
     def do_GET(self):
@@ -447,7 +468,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.path in assets:
                 file, mime = assets[self.path]
                 return self.reply(200, (self.server.assets/file).read_bytes(), mime)
-            _, csrf = self.app.session(self.headers.get('Cookie'))
+            _, csrf = self.app.session(self.headers.get('Cookie'), self.transport)
             if self.path == '/api/session': return self.reply(200, {'csrf': csrf})
             if self.path == '/api/update/status': return self.reply(200, self.app.updater.status())
             if self.path == '/api/status': return self.reply(200, self.app.status())
@@ -475,7 +496,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.headers.get_content_type() != 'application/json': raise PanelError(415, 'JSON required.')
             token = csrf = None
             if self.path != '/api/login':
-                token, csrf = self.app.session(self.headers.get('Cookie'))
+                token, csrf = self.app.session(self.headers.get('Cookie'), self.transport)
                 if not hmac.compare_digest(self.headers.get('X-CSRF-Token', ''), csrf):
                     raise PanelError(403, 'Invalid CSRF token.')
             raw = self.rfile.read(size)
@@ -484,11 +505,11 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, RecursionError): raise PanelError(400, 'Invalid JSON.') from None
             if not isinstance(body, dict): raise PanelError(400, 'JSON object required.')
             if self.path == '/api/login':
-                token, csrf = self.app.login(body.get('password'))
-                return self.reply(200, {'csrf': csrf}, cookie='awg3_session='+token+'; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=3600')
+                token, csrf = self.app.login(body.get('password'), self.transport)
+                return self.reply(200, {'csrf': csrf}, cookie=self.session_cookie(token, 3600))
             if self.path == '/api/logout':
                 with self.app.auth_lock: self.app.sessions.pop(token, None)
-                return self.reply(200, {'message':'Signed out.'}, cookie='awg3_session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0')
+                return self.reply(200, {'message':'Signed out.'}, cookie=self.session_cookie('', 0))
             if self.path == '/api/action': return self.reply(200, self.app.execute(body))
             if self.path == '/api/password': return self.reply(200, self.app.change_password(body))
             raise PanelError(404, 'Not found.')
@@ -500,7 +521,7 @@ class Server(ThreadingHTTPServer):
     daemon_threads = True
     def __init__(self, address, app, assets, context=None):
         self.app, self.assets, self.context = app, Path(assets), context
-        self.slots = threading.BoundedSemaphore(8)
+        self.slots = app.slots
         super().__init__(address, Handler)
     def get_request(self):
         sock, addr = super().get_request()
@@ -527,11 +548,13 @@ def main():
     parser.add_argument('--bind', default='192.168.1.1')
     parser.add_argument('--network', default='192.168.1.0/24')
     parser.add_argument('--port', type=int, default=8088)
+    parser.add_argument('--http-port', type=int, default=None, help='HTTP port (default 8089; 0 disables HTTP)')
     args = parser.parse_args()
     os.umask(0o077)
     config = BASE/'web/settings.json'
     if args.setup:
         validate_network(args.bind, args.network, args.port)
+        plain_port = http_port({'port': args.port, **({'http_port': args.http_port} if args.http_port is not None else {})})
         if not os.isatty(0): raise ValueError('Setup requires an interactive SSH terminal.')
         first = getpass.getpass('Panel password (12+ characters): ')
         second = getpass.getpass('Repeat password: ')
@@ -546,8 +569,9 @@ def main():
         if rc: raise ValueError('Certificate generation failed; install Entware openssl-util.')
         os.replace(folder/'key.new.pem', folder/'key.pem')
         os.replace(folder/'cert.new.pem', folder/'cert.pem')
-        private_json(config, {'bind':args.bind,'network':args.network,'port':args.port,'password':record})
+        private_json(config, {'bind':args.bind,'network':args.network,'port':args.port,'http_port':plain_port,'password':record})
         print('Configured https://'+args.bind+':'+str(args.port))
+        if plain_port: print('Configured http://'+args.bind+':'+str(plain_port))
         print('Self-signed certificate: compare the SHA256 fingerprint before trusting it:')
         rc, fingerprint = command(['/opt/bin/openssl','x509','-in',str(folder/'cert.pem'),'-noout','-fingerprint','-sha256'])
         print(fingerprint.strip())
@@ -558,7 +582,18 @@ def main():
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(config.parent/'cert.pem', config.parent/'key.pem')
     with Server((settings['bind'], settings['port']), app, Path(__file__).parent, context) as server:
-        server.serve_forever(poll_interval=0.5)
+        if not app.http_port:
+            server.serve_forever(poll_interval=0.5)
+        else:
+            # Bind both before serving; a port conflict fails startup and lets the updater roll back.
+            with Server((settings['bind'], app.http_port), app, Path(__file__).parent) as plain:
+                thread = threading.Thread(target=plain.serve_forever, kwargs={'poll_interval': 0.5}, daemon=True)
+                thread.start()
+                try: server.serve_forever(poll_interval=0.5)
+                finally:
+                    plain.shutdown()
+                    thread.join()
+
 
 if __name__ == '__main__':
     try: main()

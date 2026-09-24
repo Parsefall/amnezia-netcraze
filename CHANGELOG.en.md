@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.0
+
+Concurrent HTTP (8089) and HTTPS (8088) panel access. Shared settings and password with transport-specific sessions. Existing installations gain HTTP access on update.
+
 ## 0.8.1
 
 Fixed router import of profiles containing a DNS hostname, URL or empty value: unused DNS is discarded before IP validation, retaining firmware DNS settings. Address and AllowedIPs errors now identify the field.
