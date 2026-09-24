@@ -6,14 +6,14 @@
 
 Both addresses work simultaneously with the same password and tunnel settings:
 
-- **HTTP:** `http://192.168.1.1:8089`
+- **HTTP:** `http://192.168.1.1:8088`
 - **HTTPS:** `https://192.168.1.1:8088`
 
 Use your router LAN IP if it differs. Sign in separately at each address. HTTP sends passwords and uploaded profiles without encryption; use it only on a trusted LAN. Both listeners enforce the configured LAN subnet and authenticated actions.
 
-Updating an existing panel enables HTTP on 8089 automatically; if HTTPS already uses 8089, HTTP defaults to 8090. Password and certificate are retained. For fresh setup, `--port` selects HTTPS and `--http-port` selects HTTP; use `--http-port 0` to disable HTTP. Existing installations may set the integer `http_port` in `/opt/etc/awg3/web/settings.json` and restart `S101awg3-web`. Ports must differ and be in 1024–65535. If either port is occupied, startup fails; panel updates attempt rollback. The updater continues to verify startup through HTTPS.
+HTTP and HTTPS share the configured panel port (8088 by default). The protocol is detected automatically for each connection. Update normally; password and certificate are retained. The former http_port setting is ignored and the separate HTTP listener is removed. During setup, --port changes the shared port. Update health checks still use HTTPS.
 
-The v0.9.0 panel runs **on the router itself** through Entware. A computer or phone only provides the browser. It has its own HTTP and HTTPS addresses; it is not a card in Netcraze's built-in Applications page. Includes Russian and English UI.
+The v0.9.1 panel runs **on the router itself** through Entware. A computer or phone only provides the browser. It has its own HTTP and HTTPS addresses; it is not a card in Netcraze's built-in Applications page. Includes Russian and English UI.
 
 Features: file/key import, existing-profile replacement, start/stop of the whole VPN service, autostart, watchdog/inbox, handshake timestamps, traffic counters, PingCheck controls and status, filtered log, backup restore and panel password change. Routing and device policies stay in the firmware UI.
 
@@ -21,7 +21,7 @@ Features: file/key import, existing-profile replacement, start/stop of the whole
 
 Requires Entware and Amnezia Netcraze. For a new router, first follow [VPN installation](../INSTALL.en.md); you can then import a profile through the panel. Prior hardware testing is limited to Netcraze Giga NC-1012, hw 1210C000, aarch64, NetcrazeOS 5.1.5, kernel 4.9-ndm-5. The owner confirmed v0.4.1 panel startup on this router; the new PingCheck form has only been tested with simulated firmware.
 
-1. Download `awg3-netcraze-arm64-userspace.tar.gz` from [v0.9.0](https://github.com/Parsefall/amnezia-netcraze/releases/tag/v0.9.0). In PC PowerShell from the download directory:
+1. Download `awg3-netcraze-arm64-userspace.tar.gz` from [v0.9.1](https://github.com/Parsefall/amnezia-netcraze/releases/tag/v0.9.1). In PC PowerShell from the download directory:
 
 ```powershell
 scp -O -P 22 .\awg3-netcraze-arm64-userspace.tar.gz root@192.168.1.1:/opt/tmp/
@@ -49,7 +49,7 @@ Python modules are split into packages in [ARM64 Entware](https://bin.entware.ne
 
 The hidden password prompt is separate from root/firmware credentials. Adjust both address and subnet to your actual LAN. Wildcard/public binding is prohibited. If 8088 is occupied, choose another free port above 1023.
 
-4. Open **http://192.168.1.1:8089** or **https://192.168.1.1:8088** from the configured subnet. Exact IP/port matching is enforced; domain/CrazeDNS access is unsupported.
+4. Open **http://192.168.1.1:8088** or **https://192.168.1.1:8088** from the configured subnet. Exact IP/port matching is enforced; domain/CrazeDNS access is unsupported.
 
 Setup creates a local self-signed certificate, so the browser will show a trust warning. Compare its SHA256 fingerprint against setup output before trusting it. Display the fingerprint again with:
 
@@ -134,9 +134,9 @@ Deleted names and indexes remain reserved in `managed.tsv` so stale interface re
 
 If creation saves a profile but firmware rejects startup, the panel reports the error and retains the profile for editing, retry or deletion. Multi-tunnel operation has been tested against simulated firmware, not yet on physical NC-1012 hardware.
 
-## Updating from the panel (v0.9.0)
+## Updating from the panel (v0.9.1)
 
-Install v0.9.0 once using the existing `router/install-web.sh` procedure. Ensure the router has trusted CA certificates:
+Install v0.9.1 once using the existing `router/install-web.sh` procedure. Ensure the router has trusted CA certificates:
 
 ```sh
 opkg update

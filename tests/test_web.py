@@ -5,6 +5,7 @@ import ipaddress
 import json
 from pathlib import Path
 import shutil
+import socket
 import ssl
 import subprocess
 import tempfile
@@ -212,8 +213,7 @@ class PanelTests(unittest.TestCase):
         connection.endheaders()
         response=connection.getresponse();self.assertEqual(response.status,413);response.read();connection.close()
     def test_http_https_parallel_and_session_isolation(self):
-        plain=w.Server(('127.0.0.1',0),self.app,ROOT/'web')
-        thread=threading.Thread(target=plain.serve_forever,daemon=True);thread.start()
+        plain=self.server
         authority='127.0.0.1:'+str(plain.server_port)
         cookie=csrf=''
         def req(method,path,body=None,override=None):
@@ -222,40 +222,39 @@ class PanelTests(unittest.TestCase):
             headers.update(override or {})
             conn.request(method,path,json.dumps(body) if body is not None else None,headers)
             r=conn.getresponse();result=r.status,dict(r.getheaders()),r.read();conn.close();return result
-        try:
-            self.assertEqual(req('GET','/')[0],200)
-            self.assertEqual(req('GET','/api/status')[0],401)
-            status,headers,raw=req('POST','/api/login',{'password':PASSWORD})
-            self.assertEqual(status,200)
-            self.assertNotIn('Secure',headers['Set-Cookie'])
-            self.assertIn('HttpOnly',headers['Set-Cookie'])
-            self.assertIn('SameSite=Strict',headers['Set-Cookie'])
-            cookie=headers['Set-Cookie'].split(';')[0];csrf=json.loads(raw)['csrf']
-            self.assertTrue(cookie.startswith('awg3_http_session='))
-            self.assertEqual(req('GET','/api/status')[0],200)
-            self.assertEqual(req('POST','/api/action',{'action':'up'})[0],200)
-            for headers in ({'Host':self.app.authority},{'Origin':self.app.origin},{'X-CSRF-Token':'wrong'}):
-                self.assertEqual(req('POST','/api/action',{'action':'stop'},headers)[0],403)
-            self.login()
-            # Even renaming a cookie cannot move its token to the other transport.
-            self.assertEqual(self.request('GET','/api/session',headers={'Cookie':cookie.replace('awg3_http_session=','awg3_session=')})[0],401)
-            self.assertEqual(req('GET','/api/session',override={'Cookie':self.cookie.replace('awg3_session=','awg3_http_session=')})[0],401)
-            self.assertEqual(self.request('GET','/api/session')[0],200)
-            self.assertEqual(req('POST','/api/logout',{})[0],200)
-            self.assertEqual(req('GET','/api/session')[0],401)
-            self.assertEqual(self.request('GET','/api/session')[0],200)
-            self.app.network=ipaddress.ip_network('192.168.1.0/24')
-            self.assertEqual(req('GET','/')[0],403)
-            self.assertIs(plain.slots,self.server.slots)
-        finally:plain.shutdown();plain.server_close();thread.join()
+        self.assertEqual(req('GET','/')[0],200)
+        self.assertEqual(req('GET','/api/status')[0],401)
+        status,headers,raw=req('POST','/api/login',{'password':PASSWORD})
+        self.assertEqual(status,200)
+        self.assertNotIn('Secure',headers['Set-Cookie'])
+        self.assertIn('HttpOnly',headers['Set-Cookie'])
+        self.assertIn('SameSite=Strict',headers['Set-Cookie'])
+        cookie=headers['Set-Cookie'].split(';')[0];csrf=json.loads(raw)['csrf']
+        self.assertTrue(cookie.startswith('awg3_http_session='))
+        self.assertEqual(req('GET','/api/status')[0],200)
+        self.assertEqual(req('POST','/api/action',{'action':'up'})[0],200)
+        for headers in ({'Host':'evil.test'},{'Origin':self.app.origin},{'X-CSRF-Token':'wrong'}):
+            self.assertEqual(req('POST','/api/action',{'action':'stop'},headers)[0],403)
+        self.login()
+        # Even renaming a cookie cannot move its token to the other transport.
+        self.assertEqual(self.request('GET','/api/session',headers={'Cookie':cookie.replace('awg3_http_session=','awg3_session=')})[0],401)
+        self.assertEqual(req('GET','/api/session',override={'Cookie':self.cookie.replace('awg3_session=','awg3_http_session=')})[0],401)
+        self.assertEqual(self.request('GET','/api/session')[0],200)
+        self.assertEqual(req('POST','/api/logout',{})[0],200)
+        self.assertEqual(req('GET','/api/session')[0],401)
+        self.assertEqual(self.request('GET','/api/session')[0],200)
+        self.app.network=ipaddress.ip_network('192.168.1.0/24')
+        self.assertEqual(req('GET','/')[0],403)
+        self.assertIs(plain.slots,self.server.slots)
 
-    def test_http_port_migration_and_validation(self):
-        self.assertEqual(w.http_port({'port':8088}),8089)
-        self.assertEqual(w.http_port({'port':8089}),8090)
-        self.assertEqual(w.http_port({'port':8088,'http_port':0}),0)
-        self.assertEqual(w.http_port({'port':8088,'http_port':8099}),8099)
-        for port in (8088,80,65536,-1,'8089',True,None):
-            with self.assertRaises(ValueError):w.http_port({'port':8088,'http_port':port})
+    def test_idle_connection_does_not_block_listener(self):
+        idle=socket.create_connection(('127.0.0.1',self.server.server_port),timeout=5)
+        try:
+            self.assertEqual(self.request('GET','/')[0],200)
+            plain=http.client.HTTPConnection('127.0.0.1',self.server.server_port,timeout=5)
+            plain.request('GET','/',headers={'Host':self.app.authority})
+            response=plain.getresponse();self.assertEqual(response.status,200);response.read();plain.close()
+        finally:idle.close()
 
     def test_network_configuration(self):
         for bind,network,port in [('0.0.0.0','0.0.0.0/0',8088),('8.8.8.8','8.8.8.0/24',8088),('192.168.1.1','192.168.2.0/24',8088),('192.168.1.1','192.168.1.0/24',80)]:

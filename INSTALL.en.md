@@ -67,7 +67,7 @@ Adjust the address/subnet to your LAN. The separate panel password is 12–128 c
 
 ## 4. Add a tunnel in your browser
 
-1. Open **http://192.168.1.1:8089** or **https://192.168.1.1:8088** from the LAN. HTTP transmits passwords and profiles without encryption. The self-signed certificate triggers a browser warning; compare its fingerprint with setup output. See the [panel guide](docs/WEB.en.md).
+1. Open **http://192.168.1.1:8088** or **https://192.168.1.1:8088** from the LAN. HTTP transmits passwords and profiles without encryption. The self-signed certificate triggers a browser warning; compare its fingerprint with setup output. See the [panel guide](docs/WEB.en.md).
 2. Sign in with your panel password.
 3. Open **Tunnels → Add tunnel**.
 4. Enter a unique Latin name, choose a `.vpn`/`.txt` file **or** paste the full key.

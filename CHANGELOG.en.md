@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.1
+
+HTTP and HTTPS now share the panel port (8088). Removed the separate HTTP listener. Protocol detection is per connection; authentication and session isolation are retained.
+
 ## 0.9.0
 
 Concurrent HTTP (8089) and HTTPS (8088) panel access. Shared settings and password with transport-specific sessions. Existing installations gain HTTP access on update.

@@ -128,13 +128,6 @@ def ping_states(output):
     return result
 
 
-def http_port(settings):
-    port = settings.get('http_port', 8089 if settings['port'] != 8089 else 8090)
-    if type(port) is not int or (port != 0 and not 1024 <= port <= 65535) or port == settings['port']:
-        raise ValueError('HTTP port must differ from HTTPS and be 1024–65535, or 0 to disable.')
-    return port
-
-
 class Application:
     def __init__(self, settings, base=BASE, runner=command, runpath=Path("/var/run/awg3")):
         self.settings, self.base, self.runner = settings, Path(base), runner
@@ -143,7 +136,6 @@ class Application:
         self.network = validate_network(settings['bind'], settings['network'], settings['port'])
         self.authority = settings['bind'] + ':' + str(settings['port'])
         self.origin = 'https://' + self.authority
-        self.http_port = http_port(settings)
         self.slots = threading.BoundedSemaphore(8)
         self.sessions, self.failures = {}, deque()
         self.auth_lock, self.operation = threading.Lock(), threading.Lock()
@@ -441,7 +433,7 @@ class Handler(BaseHTTPRequestHandler):
         self.close_connection = True
 
     @property
-    def transport(self): return 'https' if self.server.context else 'http'
+    def transport(self): return 'https' if isinstance(self.connection, ssl.SSLSocket) else 'http'
 
     def session_cookie(self, token, age):
         name = 'awg3_session' if self.transport == 'https' else 'awg3_http_session'
@@ -526,7 +518,6 @@ class Server(ThreadingHTTPServer):
     def get_request(self):
         sock, addr = super().get_request()
         sock.settimeout(10)
-        if self.context: sock = self.context.wrap_socket(sock, server_side=True, do_handshake_on_connect=False)
         return sock, addr
     def process_request(self, request, address):
         if not self.slots.acquire(blocking=False):
@@ -537,7 +528,14 @@ class Server(ThreadingHTTPServer):
             self.slots.release()
             raise
     def process_request_thread(self, request, address):
-        try: super().process_request_thread(request, address)
+        try:
+            # Detect TLS inside the bounded worker, never in the accept loop.
+            # MSG_PEEK leaves the first byte for TLS or the HTTP parser to consume.
+            if self.context and request.recv(1, socket.MSG_PEEK) == b'\x16':
+                request = self.context.wrap_socket(request, server_side=True, do_handshake_on_connect=False)
+            super().process_request_thread(request, address)
+        except (OSError, ValueError):
+            self.shutdown_request(request)
         finally: self.slots.release()
     def handle_error(self, request, client_address): pass
 
@@ -548,13 +546,11 @@ def main():
     parser.add_argument('--bind', default='192.168.1.1')
     parser.add_argument('--network', default='192.168.1.0/24')
     parser.add_argument('--port', type=int, default=8088)
-    parser.add_argument('--http-port', type=int, default=None, help='HTTP port (default 8089; 0 disables HTTP)')
     args = parser.parse_args()
     os.umask(0o077)
     config = BASE/'web/settings.json'
     if args.setup:
         validate_network(args.bind, args.network, args.port)
-        plain_port = http_port({'port': args.port, **({'http_port': args.http_port} if args.http_port is not None else {})})
         if not os.isatty(0): raise ValueError('Setup requires an interactive SSH terminal.')
         first = getpass.getpass('Panel password (12+ characters): ')
         second = getpass.getpass('Repeat password: ')
@@ -569,9 +565,8 @@ def main():
         if rc: raise ValueError('Certificate generation failed; install Entware openssl-util.')
         os.replace(folder/'key.new.pem', folder/'key.pem')
         os.replace(folder/'cert.new.pem', folder/'cert.pem')
-        private_json(config, {'bind':args.bind,'network':args.network,'port':args.port,'http_port':plain_port,'password':record})
-        print('Configured https://'+args.bind+':'+str(args.port))
-        if plain_port: print('Configured http://'+args.bind+':'+str(plain_port))
+        private_json(config, {'bind':args.bind,'network':args.network,'port':args.port,'password':record})
+        print('Configured http://'+args.bind+':'+str(args.port)+' and https://'+args.bind+':'+str(args.port))
         print('Self-signed certificate: compare the SHA256 fingerprint before trusting it:')
         rc, fingerprint = command(['/opt/bin/openssl','x509','-in',str(folder/'cert.pem'),'-noout','-fingerprint','-sha256'])
         print(fingerprint.strip())
@@ -582,18 +577,7 @@ def main():
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(config.parent/'cert.pem', config.parent/'key.pem')
     with Server((settings['bind'], settings['port']), app, Path(__file__).parent, context) as server:
-        if not app.http_port:
-            server.serve_forever(poll_interval=0.5)
-        else:
-            # Bind both before serving; a port conflict fails startup and lets the updater roll back.
-            with Server((settings['bind'], app.http_port), app, Path(__file__).parent) as plain:
-                thread = threading.Thread(target=plain.serve_forever, kwargs={'poll_interval': 0.5}, daemon=True)
-                thread.start()
-                try: server.serve_forever(poll_interval=0.5)
-                finally:
-                    plain.shutdown()
-                    thread.join()
-
+        server.serve_forever(poll_interval=0.5)
 
 if __name__ == '__main__':
     try: main()
