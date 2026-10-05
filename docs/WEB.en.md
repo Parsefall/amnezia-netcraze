@@ -1,5 +1,7 @@
 # Router web panel
 
+Version 0.10.0 adds a **Backup tunnel** selector to each tunnel's settings. Choose another connection or No backup and save. Keep IP/domain lists in Netcraze. See [Routing](ROUTING.en.md#backup-tunnel-0100) for supported firmware rules, failover conditions and recovery.
+
 [Русский](WEB.md) | **English**
 
 ## HTTP and HTTPS access

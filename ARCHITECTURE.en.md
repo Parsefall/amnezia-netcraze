@@ -14,6 +14,10 @@
 - `/var/run/awg3/opkgtunN.pid`: PID verified against /proc/PID/exe and cmdline.
 - `/var/run/awg3/service.lock`: serializes start/stop/repair/save/install.
 - `/opt/etc/awg3/conf/parsed`: generated files with restricted permissions.
+- `/opt/etc/awg3/failover.json`: backup tunnel assignments.
+- `/opt/etc/awg3/failover-journal.json`: original and temporary rules for a pending transaction or active backup, written before firmware commands without VPN keys.
+
+In 0.10.0 a background worker in `web/server.py` checks PingCheck and backup assignments every 10 seconds and switches supported firmware rules under `service.lock`. Engines keep running. Return requires 30 seconds of `pass`; unknown status does not initiate switching. Both switching and restoration use a `pending`/`active` journal and configuration readback. Whole policy membership is journaled because firmware renumbers members. External conflicts stop automatic changes. An abrupt process termination can leave a `service.lock` requiring normal lock diagnostics; the worker never removes another owner's lock. See [supported rules and limitations](docs/ROUTING.en.md).
 
 Deleting a profile does not automatically free its index. The state entry and object remain so an index with existing policies cannot be reused accidentally. Removing a binding requires a separate manual operation after checking routes.
 

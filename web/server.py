@@ -2,6 +2,7 @@
 """Local HTTP/HTTPS control panel. No shell commands, remote assets or key downloads."""
 import argparse
 import base64
+from contextlib import contextmanager
 from collections import deque
 import getpass
 import hashlib
@@ -94,7 +95,11 @@ def command(args, timeout=75):
             else: p.kill()
             p.communicate()
         raise PanelError(504, 'Operation timed out. Inspect service state before retrying.') from None
-    return p.returncode, out[:65536].decode('utf-8', 'replace')
+    # A router with imported IP lists can have a large running-config. Never
+    # silently truncate it: failover must see every route before changing any.
+    if len(out) > 2 * 1024 * 1024:
+        raise PanelError(503, 'Firmware response is too large.')
+    return p.returncode, out.decode('utf-8', 'replace')
 
 
 def clean_diagnostic(text):
@@ -128,6 +133,390 @@ def ping_states(output):
     return result
 
 
+class FailoverRule:
+    """Only validated, interface-directed firmware routing commands are replayed."""
+    def __init__(self, command):
+        words = command.split()
+        self.kind = 'route'
+        if words[:2] == ['ip', 'route']:
+            start = 2
+        elif len(words) > 4 and words[:2] == ['ip', 'policy'] and NAME.fullmatch(words[2]) and words[3] == 'route':
+            start = 4
+        elif len(words) > 5 and words[:2] == ['ip', 'policy'] and NAME.fullmatch(words[2]) and words[3:5] == ['permit', 'global']:
+            self.kind, start = 'policy', 5
+        elif words[:3] == ['dns-proxy', 'route', 'object-group'] and len(words) > 4 and NAME.fullmatch(words[3]):
+            self.kind, start = 'dns', 4
+        else:
+            raise ValueError('Unsupported routing command')
+        prefix = words[:start]
+        if self.kind == 'route':
+            destination = words[start]
+            start += 1
+            if destination == 'default':
+                self.network = ipaddress.IPv4Network('0.0.0.0/0')
+            else:
+                if '/' not in destination and start < len(words) and not words[start].startswith('OpkgTun'):
+                    destination += '/' + words[start].lstrip('/')
+                    start += 1
+                self.network = ipaddress.IPv4Network(destination, strict=True)
+            if self.network.prefixlen == 0:
+                prefix += ['default']
+            elif self.network.prefixlen == 32:
+                prefix += [str(self.network.network_address)]
+            else:
+                prefix += [str(self.network.network_address), str(self.network.netmask)]
+        self.iface = words[start]
+        iface_pattern = r'[A-Za-z][A-Za-z0-9_./-]{0,95}' if self.kind == 'policy' else r'OpkgTun(?:0|[1-9][0-9]?)'
+        if not re.fullmatch(iface_pattern, self.iface):
+            raise ValueError('A direct managed interface is required')
+        tail = words[start+1:]
+        if self.kind == 'policy':
+            if tail and (len(tail) != 2 or tail[0] != 'order' or not tail[1].isdigit() or not 0 <= int(tail[1]) <= 65534):
+                raise ValueError('Invalid policy order')
+            suffix = tail
+            self.remove = ' '.join(prefix[:3] + ['no', 'permit', 'global', self.iface])
+        else:
+            if not re.fullmatch(r'(?:auto ?)?(?:[0-9]+ ?)?(?:reject)?', ' '.join(tail)):
+                raise ValueError('Unsupported route options')
+            metric = next((x for x in tail if x.isdigit()), None)
+            if metric and (self.kind == 'dns' or int(metric) > 65535):
+                raise ValueError('Invalid metric')
+            if 'reject' in tail and ('auto' not in tail or (self.kind == 'route' and self.network.prefixlen == 0)):
+                raise ValueError('Invalid exclusive route')
+            suffix = (['auto'] if 'auto' in tail else []) + ([metric] if metric else []) + (['reject'] if 'reject' in tail else [])
+            self.remove = 'no ' + ' '.join(prefix + [self.iface] + ([metric] if metric else []))
+        self.prefix, self.suffix = prefix, suffix
+        self.command = ' '.join(prefix + [self.iface] + suffix)
+        self.key = ' '.join(prefix + [self.iface])
+
+    def through(self, iface):
+        return FailoverRule(' '.join(self.prefix + [iface] + self.suffix))
+
+
+def routing_rules(config):
+    rules, unsupported, context = {}, set(), ''
+    parent_interfaces, parent_indent = set(), -1
+    for raw in config.splitlines():
+        line = raw.strip()
+        if not line or line == '!':
+            context = ''
+            parent_interfaces = set()
+            continue
+        indent = len(raw)-len(raw.lstrip())
+        if parent_interfaces and indent > parent_indent:
+            unsupported.update(parent_interfaces)
+            continue
+        parent_interfaces = set()
+        if not raw[0].isspace():
+            context = line if line == 'dns-proxy' or re.fullmatch(r'ip policy [A-Za-z0-9_.-]+', line) else ''
+            command = line
+        else:
+            command = context + ' ' + line if context else ''
+        if not (command.startswith(('ip route ', 'dns-proxy route ')) or re.match(r'ip policy \S+ (route |permit global )', command)):
+            continue
+        interfaces = set(re.findall(r'\bOpkgTun[0-9]+\b', command))
+        parent_interfaces, parent_indent = interfaces, indent
+        if not interfaces and not re.match(r'ip policy \S+ permit global ', command):
+            continue
+        try:
+            rule = FailoverRule(command)
+            if rule.key in rules and rules[rule.key].command != rule.command:
+                raise ValueError('Ambiguous route')
+            rules[rule.key] = rule
+        except (ValueError, IndexError):
+            unsupported.update(interfaces)
+    return rules, unsupported
+
+
+class Failover:
+    """Background firmware routing transactions; never reloads VPN credentials."""
+    def __init__(self, app, clock=time.monotonic):
+        self.app, self.clock = app, clock
+        self.path = app.base/'failover.json'
+        self.journal = app.base/'failover-journal.json'
+        self.recovered = {}
+        self.error = ''
+        self.stop = threading.Event()
+
+    def read(self, path):
+        try:
+            if path.is_symlink() or path.stat().st_size > 2*1024*1024:
+                raise PanelError(503, 'failover_invalid_state')
+            value = json.loads(path.read_text(encoding='utf-8'))
+            if not isinstance(value, dict): raise ValueError()
+            return value
+        except FileNotFoundError:
+            return {}
+        except (ValueError, TypeError):
+            raise PanelError(503, 'failover_invalid_state') from None
+
+    def pairs(self):
+        pairs = self.read(self.path)
+        if len(pairs) > 100 or any(not isinstance(k, str) or not NAME.fullmatch(k) or not isinstance(v, str) or not NAME.fullmatch(v) for k,v in pairs.items()):
+            raise PanelError(503, 'failover_invalid_state')
+        for source in pairs:
+            seen, node = set(), source
+            while node in pairs:
+                if node in seen: raise PanelError(400, 'failover_cycle')
+                seen.add(node)
+                node = pairs[node]
+        return pairs
+
+    def record(self):
+        record = self.read(self.journal)
+        if not record: return {}
+        try:
+            if record['phase'] not in ('pending', 'active'): raise ValueError()
+            for field in ('before', 'after'):
+                if not isinstance(record[field], list) or len(record[field]) > 10000: raise ValueError()
+                for line in record[field]:
+                    if not isinstance(line, str) or FailoverRule(line).command != line: raise ValueError()
+            if not isinstance(record['via'], dict) or any(not NAME.fullmatch(k) or not isinstance(v, str) or not NAME.fullmatch(v) for k,v in record['via'].items()): raise ValueError()
+        except (KeyError, ValueError, TypeError, IndexError):
+            raise PanelError(503, 'failover_invalid_state') from None
+        return record
+
+    @contextmanager
+    def lock(self):
+        self.app.runpath.mkdir(parents=True, exist_ok=True)
+        lock = self.app.runpath/'service.lock'
+        try: lock.mkdir()
+        except FileExistsError: raise PanelError(409, 'VPN service is busy. Try again later.') from None
+        try:
+            (lock/'pid').write_text(str(os.getpid())+'\n')
+            if (self.app.runpath/'update.lock').exists(): raise PanelError(409, 'update_busy')
+            yield
+        finally:
+            (lock/'pid').unlink(missing_ok=True)
+            lock.rmdir()
+
+    def snapshot(self):
+        return routing_rules(self.app.ndmc('show running-config'))
+
+    def restore(self, record):
+        """Also handles a crash/timeout between any two firmware commands."""
+        before = {FailoverRule(x).key:FailoverRule(x) for x in record['before']}
+        after = {FailoverRule(x).key:FailoverRule(x) for x in record['after']}
+        current, _ = self.snapshot()
+        for key in before.keys() | after.keys():
+            present = current.get(key)
+            allowed = {x.command for x in (before.get(key), after.get(key)) if x}
+            if present and present.command not in allowed and not (record['phase'] == 'pending' and present.kind == 'policy'):
+                raise PanelError(409, 'failover_route_conflict')
+        # Returning to the primary is itself a recoverable transaction.
+        record = dict(record, phase='pending')
+        private_json(self.journal, record)
+        for rule in sorted(before.values(), key=self.apply_order):
+            key = rule.key
+            if rule.kind == 'policy' or key not in current or current[key].command != rule.command:
+                self.app.ndmc(rule.command)
+        # Firmware may either upsert a DNS group or keep one entry per interface.
+        # Inspect after adding originals, and delete only the temporary destination.
+        current, _ = self.snapshot()
+        for key, rule in after.items():
+            if key not in before and key in current:
+                self.app.ndmc(rule.remove)
+        verified, _ = self.snapshot()
+        if any(verified.get(k) is None or verified[k].command != r.command for k,r in before.items()) or any(k in verified for k in after.keys()-before.keys()):
+            raise PanelError(503, 'failover_restore_failed')
+        self.journal.unlink(missing_ok=True)
+
+    @staticmethod
+    def apply_order(rule):
+        return (rule.kind == 'policy', tuple(rule.prefix), int(rule.suffix[-1]) if rule.kind == 'policy' and rule.suffix else -1, rule.iface)
+
+    def reset(self):
+        with self.lock():
+            record = self.record()
+            if record: self.restore(record)
+        self.recovered.clear()
+
+    def configure(self, source, target):
+        tunnels = {t['profile']:t for t in self.app.status()['tunnels']}
+        if not isinstance(source, str) or source not in tunnels or not tunnels[source]['interface']:
+            raise PanelError(400, 'Unknown tunnel.')
+        if target is not None and (not isinstance(target, str) or target not in tunnels or not tunnels[target]['interface']):
+            raise PanelError(400, 'failover_unknown_backup')
+        if source == target: raise PanelError(400, 'failover_cycle')
+        pairs = self.pairs()
+        if target is None: pairs.pop(source, None)
+        else: pairs[source] = target
+        for node in pairs:
+            seen = set()
+            while node in pairs:
+                if node in seen: raise PanelError(400, 'failover_cycle')
+                seen.add(node); node = pairs[node]
+        with self.lock():
+            record = self.record()
+            if target:
+                config = self.app.ndmc('show running-config')
+                for name in (source, target):
+                    iface = tunnels[name]['interface']
+                    if not re.search(r'^interface '+re.escape(iface)+r'\s*\n(?:[ \t]+[^\n]*\n)*?[ \t]+ping-check profile \S+', config+'\n', re.M):
+                        raise PanelError(400, 'failover_ping_required')
+                rules, unsupported = routing_rules(config)
+                if record:
+                    for line in record['after']: rules.pop(FailoverRule(line).key, None)
+                    for line in record['before']:
+                        rule = FailoverRule(line); rules[rule.key] = rule
+                if tunnels[source]['interface'] in unsupported:
+                    raise PanelError(400, 'failover_unsupported_route')
+                if not any(r.iface == tunnels[source]['interface'] for r in rules.values()):
+                    raise PanelError(400, 'failover_no_routes')
+            if record: self.restore(record)
+            private_json(self.path, pairs)
+        self.recovered.clear()
+        self.error = ''
+        return {'message':'failover_saved'}
+
+    def desired_targets(self, pairs, tunnels, previous):
+        via = {}
+        now = self.clock()
+        def enabled(t):
+            return t and not t['paused'] and not t['stopped'] and t.get('started', False)
+        def healthy(t):
+            return enabled(t) and t['engine'] and t['ping'] == 'pass'
+        for source in pairs:
+            primary = tunnels.get(source)
+            if not enabled(primary):
+                self.recovered.pop(source, None)
+                continue
+            old = previous.get(source)
+            if healthy(primary):
+                since = self.recovered.setdefault(source, now)
+                if old and healthy(tunnels.get(old)) and now-since < 30:
+                    via[source] = old
+                continue
+            self.recovered.pop(source, None)
+            if primary['ping'] != 'fail':
+                if old and healthy(tunnels.get(old)): via[source] = old
+                continue
+            node, seen = source, set()
+            while node in pairs and node not in seen:
+                seen.add(node); node = pairs[node]
+                candidate = tunnels.get(node)
+                if healthy(candidate):
+                    via[source] = node
+                    break
+                if not enabled(candidate) or candidate['ping'] != 'fail': break
+        return via
+
+    def tick(self):
+        if not self.app.operation.acquire(blocking=False): return
+        try:
+            if (self.app.runpath/'update.lock').exists(): return
+            pairs, record = self.pairs(), self.record()
+            if not pairs and not record: return
+            with self.lock():
+                if record and record['phase'] == 'pending':
+                    self.restore(record); record = {}
+                status = self.app.status()
+                tunnels = {t['profile']:dict(t, started=status['started']) for t in status['tunnels']}
+                current, unsupported = self.snapshot()
+                if record:
+                    before_rules = {FailoverRule(x).key: x for x in record['before']}
+                    added_keys = {FailoverRule(x).key for x in record['after']} - before_rules.keys()
+                    # After a router reboot, startup-config may already be original.
+                    if all(k in current and current[k].command == v for k,v in before_rules.items()) and not added_keys & current.keys():
+                        self.journal.unlink(missing_ok=True)
+                        record = {}
+                via = self.desired_targets(pairs, tunnels, record.get('via', {}))
+                # Reconstruct the user's routing configuration from the durable journal.
+                logical = dict(current)
+                if record:
+                    for line in record['after']:
+                        rule = FailoverRule(line)
+                        if rule.key not in current or current[rule.key].command != line:
+                            raise PanelError(409, 'failover_route_conflict')
+                        logical.pop(rule.key)
+                    for line in record['before']:
+                        rule = FailoverRule(line)
+                        if rule.key in logical: raise PanelError(409, 'failover_route_conflict')
+                        logical[rule.key] = rule
+                mapping = {tunnels[a]['interface']:tunnels[b]['interface'] for a,b in via.items()}
+                if unsupported & mapping.keys(): raise PanelError(400, 'failover_unsupported_route')
+                desired = {}
+                allowed = {}
+                for rule in logical.values():
+                    replacement = rule.through(mapping[rule.iface]) if rule.iface in mapping else rule
+                    if rule.iface in mapping:
+                        if rule.kind == 'policy' and not rule.suffix:
+                            raise PanelError(400, 'failover_unsupported_route')
+                        target = replacement.iface
+                        if target not in allowed:
+                            rc, output = self.app.runner([AWG, 'show', target.lower(), 'allowed-ips'], 5)
+                            allowed[target] = []
+                            if rc: raise PanelError(503, 'failover_backup_coverage')
+                            for word in output.replace(',', ' ').split():
+                                try: allowed[target].append(ipaddress.IPv4Network(word))
+                                except ValueError: pass
+                        network = rule.network if rule.kind == 'route' else ipaddress.IPv4Network('0.0.0.0/0')
+                        if not any(network.subnet_of(n) for n in allowed[target]):
+                            raise PanelError(400, 'failover_backup_coverage')
+                    if replacement.key in desired and desired[replacement.key].command != replacement.command:
+                        previous = desired[replacement.key]
+                        if previous.kind == replacement.kind == 'policy' and previous.suffix and replacement.suffix:
+                            replacement = min((previous, replacement), key=lambda r:int(r.suffix[-1]))
+                        else:
+                            raise PanelError(409, 'failover_route_conflict')
+                    desired[replacement.key] = replacement
+                # Removing a policy member renumbers the following members in
+                # firmware. Include these order changes in the recovery journal.
+                policy_groups = {tuple(r.prefix) for r in desired.values() if r.kind == 'policy' and any(x.kind == 'policy' and x.prefix == r.prefix and x.iface in mapping for x in logical.values())}
+                for prefix in policy_groups:
+                    members = [r for r in desired.values() if tuple(r.prefix) == prefix]
+                    if any(not r.suffix for r in members): raise PanelError(400, 'failover_unsupported_route')
+                    for order, member in enumerate(sorted(members, key=lambda r:int(r.suffix[-1]))):
+                        desired[member.key] = FailoverRule(' '.join(member.prefix + [member.iface, 'order', str(order)]))
+                before = sorted(r.command for k,r in logical.items() if tuple(r.prefix) in policy_groups or k not in desired or desired[k].command != r.command)
+                after = sorted(r.command for k,r in desired.items() if tuple(r.prefix) in policy_groups or k not in logical or logical[k].command != r.command)
+                if record and record['before'] == before and record['after'] == after and record['via'] == via:
+                    self.error = ''
+                    return
+                if record: self.restore(record)
+                if not before and not after:
+                    self.error = 'failover_no_routes' if via else ''
+                    return
+                # Both endpoints of every change are saved BEFORE the first mutation.
+                record = {'phase':'pending', 'before':before, 'after':after, 'via':via}
+                private_json(self.journal, record)
+                try:
+                    after_keys = {FailoverRule(x).key for x in after}
+                    # Remove replaced policy members first, then assign final
+                    # ranks in order; firmware renumbers members on each write.
+                    for line in before:
+                        rule = FailoverRule(line)
+                        if rule.kind == 'policy' and rule.key not in after_keys:
+                            self.app.ndmc(rule.remove)
+                    for rule in sorted((FailoverRule(x) for x in after), key=self.apply_order):
+                        self.app.ndmc(rule.command)
+                    intermediate, _ = self.snapshot()
+                    for line in before:
+                        rule = FailoverRule(line)
+                        if rule.key not in after_keys and rule.key in intermediate: self.app.ndmc(rule.remove)
+                    actual, _ = self.snapshot()
+                    if any(actual.get(k) is None or actual[k].command != r.command for k,r in desired.items()) or any(FailoverRule(x).key in actual for x in before if FailoverRule(x).key not in desired):
+                        raise PanelError(503, 'failover_apply_failed')
+                    record['phase'] = 'active'
+                    private_json(self.journal, record)
+                except (PanelError, OSError):
+                    try: self.restore(record)
+                    except (PanelError, OSError): raise PanelError(503, 'failover_restore_failed') from None
+                    raise
+                self.error = ''
+        except PanelError as error:
+            if error.code != 409 or error.message == 'failover_route_conflict': self.error = error.message
+        except (OSError, ValueError):
+            self.error = 'failover_invalid_state'
+        finally:
+            self.app.operation.release()
+
+    def run(self):
+        while not self.stop.is_set():
+            self.tick()
+            self.stop.wait(10)
+
+
 class Application:
     def __init__(self, settings, base=BASE, runner=command, runpath=Path("/var/run/awg3")):
         self.settings, self.base, self.runner = settings, Path(base), runner
@@ -139,6 +528,7 @@ class Application:
         self.slots = threading.BoundedSemaphore(8)
         self.sessions, self.failures = {}, deque()
         self.auth_lock, self.operation = threading.Lock(), threading.Lock()
+        self.failover = Failover(self)
 
     def login(self, password, transport='https'):
         with self.auth_lock:
@@ -217,6 +607,7 @@ class Application:
         started = (self.runpath/'running').exists()
         for tunnel in tunnels:
             check = checks.get(tunnel['interface'], 'unknown')
+            tunnel['ping'] = check
             tunnel['paused'] = (self.base/'paused'/tunnel['profile']).exists()
             tunnel['stopped'] = bool(tunnel['interface'] and (self.runpath/('stopped-'+tunnel['interface'][7:])).exists())
             tunnel['active'] = started and tunnel['engine'] and not tunnel['paused'] and not tunnel['stopped']
@@ -225,12 +616,20 @@ class Application:
             label = self.base/'names'/tunnel['profile']
             text = label.read_text().strip() if label.is_file() and not label.is_symlink() else ''
             tunnel['name'] = text if re.fullmatch(r'[A-Za-z0-9_. -]{1,64}', text) else tunnel['profile']
+        try:
+            pairs, failover_state = self.failover.pairs(), self.failover.record()
+            failover_error = self.failover.error
+        except PanelError as error:
+            pairs, failover_state, failover_error = {}, {}, error.message
+        for tunnel in tunnels:
+            tunnel['backup'] = pairs.get(tunnel['profile'])
+            tunnel['via'] = failover_state.get('via', {}).get(tunnel['profile']) if failover_state.get('phase') == 'active' else None
         active = any(tunnel['active'] for tunnel in tunnels)
         return {'running': active, 'started': started, 'profiles': self.profiles(), 'tunnels': tunnels, 'backups': backups,
                 'enabled': (self.base/'enabled').exists(),
                 'watchdog': (self.base/'watchdog-enabled').exists(),
                 'pingcheck': clean_diagnostic(ping) if rc == 0 else 'PingCheck unavailable',
-                'busy': self.operation.locked(), 'update': self.updater.status()}
+                'busy': self.operation.locked(), 'update': self.updater.status(), 'failover_error':failover_error}
 
     def ndmc(self, text):
         rc, output = self.runner(['ndmc', '-c', text], 12)
@@ -242,6 +641,13 @@ class Application:
     def pingcheck_action(self, body):
         action = body['action']
         iface = body.get('interface', '')
+        if action == 'pingcheck-save' and self.failover.record():
+            raise PanelError(409, 'failover_save_blocked')
+        if action == 'pingcheck-disable':
+            pairs = self.failover.pairs()
+            used = set(pairs) | set(pairs.values())
+            if used and any(t['interface'] == iface and t['profile'] in used for t in self.status()['tunnels']):
+                raise PanelError(409, 'failover_ping_in_use')
         if action != 'pingcheck-save':
             if not isinstance(iface, str) or not re.fullmatch(r'OpkgTun(0|[1-9][0-9]?)', iface):
                 raise PanelError(400, 'Select a managed VPN interface.')
@@ -340,8 +746,19 @@ class Application:
         try:
             action = body.get('action')
             if action == 'update-check': return self.updater.check()
-            if action == 'update-start': return self.updater.start(body.get('version'))
+            if action == 'update-start':
+                if self.failover.record(): self.failover.reset()
+                return self.updater.start(body.get('version'))
             if (self.runpath/'update.lock').exists(): raise PanelError(409, 'update_busy')
+            if action == 'failover-set':
+                return self.failover.configure(body.get('name'), body.get('backup'))
+            if action == 'delete':
+                pairs = self.failover.pairs()
+                name = body.get('name')
+                if isinstance(name, str) and (name in pairs or name in pairs.values()):
+                    raise PanelError(409, 'failover_tunnel_in_use')
+            if action in ('stop', 'tunnel-down', 'delete') and self.failover.record():
+                self.failover.reset()
             if action in ('pingcheck-apply', 'pingcheck-disable', 'pingcheck-save'):
                 return self.pingcheck_action(body)
             if action in ('up','stop','enable','disable'):
@@ -543,6 +960,7 @@ class Server(ThreadingHTTPServer):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--setup', action='store_true')
+    parser.add_argument('--restore-failover', action='store_true')
     parser.add_argument('--bind', default='192.168.1.1')
     parser.add_argument('--network', default='192.168.1.0/24')
     parser.add_argument('--port', type=int, default=8088)
@@ -573,11 +991,27 @@ def main():
         return
     settings = json.loads(config.read_text())
     app = Application(settings)
+    if args.restore_failover:
+        if app.failover.record(): app.failover.reset()
+        return
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(config.parent/'cert.pem', config.parent/'key.pem')
     with Server((settings['bind'], settings['port']), app, Path(__file__).parent, context) as server:
-        server.serve_forever(poll_interval=0.5)
+        def shutdown(*_):
+            app.failover.stop.set()
+            threading.Thread(target=server.shutdown, daemon=True).start()
+        signal.signal(signal.SIGTERM, shutdown)
+        worker = threading.Thread(target=app.failover.run, name='awg3-failover', daemon=True)
+        worker.start()
+        try:
+            server.serve_forever(poll_interval=0.5)
+        finally:
+            app.failover.stop.set()
+            # Finish/roll back the routing transaction before exiting; never leave
+            # a detached ndmc command changing routes after the journal is restored.
+            worker.join()
+            if app.failover.record(): app.failover.reset()
 
 if __name__ == '__main__':
     try: main()

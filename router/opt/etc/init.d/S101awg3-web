@@ -41,6 +41,7 @@ stop() {
         alive && { echo 'Panel did not stop'; return 1; }
     fi
     rm -f "$PIDFILE"
+    [ ! -f "$BASE/failover-journal.json" ] || "$PYTHON" "$APP" --restore-failover || return 1
     return 0
 }
 mkdir "$RUN/web-service.lock" 2>/dev/null || { echo 'Web service busy'; exit 1; }

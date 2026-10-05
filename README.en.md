@@ -9,6 +9,7 @@ Amnezia VPN on your router, with a convenient web panel. Manage VPN connections 
 - **Easy setup:** create an AmneziaWG client profile in Amnezia, then upload its `.vpn`/`.txt` export or paste the full client key into the panel.
 - **Multiple VPN tunnels:** create, name, start, pause and delete connections, with individual settings for each tunnel.
 - **Connection monitoring:** view tunnel status and configure PingCheck.
+- **Backup tunnel:** select a backup for each tunnel and temporarily switch supported router routes on failure, returning when the primary recovers. [Details and limitations](docs/ROUTING.en.md).
 - **Autostart and recovery:** start VPN after router reboot and use watchdog to recover an unresponsive local engine.
 - **Convenient maintenance:** view logs, replace a tunnel's key and install compatible updates from GitHub through the panel.
 - **Russian and English interface.**

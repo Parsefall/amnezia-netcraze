@@ -4,6 +4,14 @@
 
 Router observations were made on September 22, 2026.
 
+## Backup routing 0.10.0 — local validation
+
+26 tests in `tests/test_failover.py` cover failure and recovery, chains and cycles, unavailable backups, unknown PingCheck, manual stops, AllowedIPs coverage, static and DNS routes, policy ordering, partial-command rollback, timeout after application, interrupted restoration, restart, external conflicts and locks. These use a mutable firmware model, not a physical router. Actual client traffic after switching still needs device validation.
+
+The full Python suite contains 99 tests. JavaScript and shell syntax are checked separately. Parser and main VPN service shell tests pass under Git Bash; the web service lifecycle test cannot start the panel in this environment because `/proc` process identification differs from Linux. It remains in Linux CI; the local result does not establish successful Entware service validation.
+
+Edge browser checks against the local model covered saving a backup, page reload, active backup status, disabling it, retaining unsaved selection across status refresh, RU/EN, and a 390 px viewport. No JavaScript errors or horizontal overflow were observed. The deployment archive was built with content and SHA256SUMS verification.
+
 ## The only tested router
 
 Netcraze Giga **NC-1012**, hardware **1210C000**, ARM64/aarch64, 512 MB RAM, firmware **5.1.5 / 5.01.C.5.0-0**, Linux **4.9-ndm-5**, Entware, /dev/net/tun. The project owner supplied the device results. Other models, revisions, and firmware versions have not been tested.

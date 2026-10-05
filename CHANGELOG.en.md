@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.0
+
+- Per-tunnel backup selection. IP/domain lists remain in Netcraze; no duplicate lists in the panel.
+- A background worker checks every 10 seconds, redirects firmware routing on primary PingCheck `fail` only to a running backup with `pass`, and returns after 30 seconds of stable primary availability.
+- Supports interface-directed IPv4 routes, DNS object-group routes, and explicit ordered policy memberships. Arbitrary routing and implicit global-priority selection are not automatically replaced.
+- Durable routing recovery journal, readback verification, backup cycle rejection, and protection against saving temporary firmware routes through the panel.
+- Validated with simulated firmware. Real NC-1012 outage/failback testing is still required before use for critical traffic.
+
 ## 0.9.1
 
 HTTP and HTTPS now share the panel port (8088). Removed the separate HTTP listener. Protocol detection is per connection; authentication and session isolation are retained.
