@@ -1,6 +1,7 @@
 """Create an explicitly IPv4-only private copy. Never modify the source."""
 import argparse
 import ipaddress
+import os
 from pathlib import Path
 
 parser = argparse.ArgumentParser()
@@ -25,7 +26,7 @@ for line in lines:
     result.append(line)
 args.destination.parent.mkdir(parents=True, exist_ok=True)
 # Exclusive create prevents accidentally replacing another private profile.
-with args.destination.open("x", encoding="utf-8", newline="\n") as f:
+fd = os.open(args.destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
     f.write("\n".join(result) + "\n")
-args.destination.chmod(0o600)
 print(f"Private IPv4 copy written; removed {removed} IPv6 route(s). Original unchanged.")

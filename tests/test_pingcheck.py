@@ -17,7 +17,7 @@ class PingTests(unittest.TestCase):
         (self.base/'managed.tsv').write_text(str(self.base/'conf/pars.conf')+'\t0\tOpkgTun0\n')
         self.config = 'interface OpkgTun0\n    ping-check profile AWG3Check\n    ping-check restart\n!\ninterface ISP\n    ping-check profile AWG3Check\n!\nsecret NEVER_RETURN_THIS\n'
         self.calls = []
-        self.fail = None
+        self.reject_command = None
         self.app = w.Application({'bind':'192.168.1.1','network':'192.168.1.0/24','port':8088}, self.base, self.runner, self.base/'run')
         self.body = {'action':'pingcheck-apply','interface':'OpkgTun0','host':'1.1.1.1','update-interval':10,'timeout':3,'max-fails':3,'min-success':2}
     def tearDown(self): self.tmp.cleanup()
@@ -25,7 +25,7 @@ class PingTests(unittest.TestCase):
         cmd = args[2]
         self.calls.append(cmd)
         if cmd == 'show running-config': return 0, self.config
-        if self.fail and self.fail(cmd): return 0, 'Command::Base error[7405602]: argument parse error.'
+        if self.reject_command and self.reject_command(cmd): return 0, 'Command::Base error[7405602]: argument parse error.'
         return 0, 'OK'
     def test_interface_scoped_status(self):
         output = """    pingcheck:
@@ -47,10 +47,12 @@ class PingTests(unittest.TestCase):
 """
         self.assertEqual(w.ping_states(output), {'OpkgTun0':'fail', 'OpkgTun1':'pass'})
         self.assertEqual(w.ping_states('profile: AWG3Check\nstatus: pass'), {})
+        self.assertEqual(w.ping_states('interface: OpkgTun2\nstatus: fail\ninterface: ISP\nstatus: pass'), {'OpkgTun2': 'fail'})
     def test_connection_and_saved_display_name(self):
         original = self.app.runner
         def runner(args, timeout=75):
             if args[0] == w.AWG: return 0, 'key 123 456'
+            if args[-1] == 'show interface OpkgTun0': return 0, 'type: OpkgTun\nlink: up\nconnected: yes'
             if args[-1] == 'show ping-check': return 0, 'interface:\n name: OpkgTun0\n status: pass'
             return original(args,timeout)
         self.app.runner=runner
@@ -100,18 +102,18 @@ class PingTests(unittest.TestCase):
         self.assertEqual(error.exception.code,409)
         self.assertTrue(lock.exists());self.assertEqual(self.calls,[])
     def test_setup_error_keeps_previous_assignment(self):
-        self.fail=lambda cmd: ' mode icmp' in cmd
+        self.reject_command=lambda cmd: ' mode icmp' in cmd
         with self.assertRaises(w.PanelError): self.app.execute(self.body)
         self.assertFalse(any(c.startswith('interface ') for c in self.calls))
         self.assertTrue(self.calls[-1].startswith('no ping-check profile AWG3Web'))
     def test_assignment_error_restores_previous_restart(self):
-        self.fail=lambda cmd: cmd == 'interface OpkgTun0 no ping-check restart'
+        self.reject_command=lambda cmd: cmd == 'interface OpkgTun0 no ping-check restart'
         with self.assertRaises(w.PanelError): self.app.execute(self.body)
         self.assertIn('interface OpkgTun0 ping-check profile AWG3Check', self.calls)
         self.assertIn('interface OpkgTun0 ping-check restart', self.calls)
         self.assertFalse((self.base/'run/service.lock').exists())
     def test_failed_rollback_reported(self):
-        self.fail=lambda cmd: cmd.startswith('interface ')
+        self.reject_command=lambda cmd: cmd.startswith('interface ')
         with self.assertRaises(w.PanelError) as error: self.app.execute(self.body)
         self.assertEqual(error.exception.code,500)
         self.assertIn('rollback', error.exception.message)

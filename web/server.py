@@ -120,9 +120,11 @@ def ping_states(output):
         indent = len(line)-len(line.lstrip())
         if text in ('pingcheck:', 'interface:'):
             iface, block_indent = None, None
-        match = re.fullmatch(r'name: (OpkgTun(?:0|[1-9][0-9]?))', text)
+        match = re.fullmatch(r'(?:name|interface):\s+(OpkgTun(?:0|[1-9][0-9]?))', text)
         if match:
             iface, block_indent = match[1], indent
+        elif text.startswith(('name:', 'interface:')):
+            iface = None
         elif iface and text.startswith('status:'):
             value = text.split(':',1)[1].strip()
             result[iface] = value if value in ('pass', 'fail') else 'unknown'
@@ -131,6 +133,19 @@ def ping_states(output):
             # CLI key alignment varies; only section boundaries invalidate above.
             if text.endswith(':'): iface = None
     return result
+
+
+def firmware_link(output, iface):
+    # The summary has its own nested "link" field with different semantics.
+    header = re.split(r'(?m)^\s*summary:\s*$', output, maxsplit=1)[0]
+    fields = dict(re.findall(r'(?m)^[ \t]*(id|type|state|link|connected):[ \t]+(\S+)[ \t]*$', header))
+    if fields.get('id', iface) != iface or fields.get('type') != 'OpkgTun':
+        return 'unknown'
+    if fields.get('state') == 'down' or fields.get('link') == 'down' or fields.get('connected') == 'no':
+        return 'down'
+    if fields.get('link') == 'up' and fields.get('connected') == 'yes':
+        return 'up'
+    return 'unknown'
 
 
 class FailoverRule:
@@ -176,14 +191,14 @@ class FailoverRule:
             suffix = tail
             self.remove = ' '.join(prefix[:3] + ['no', 'permit', 'global', self.iface])
         else:
-            if not re.fullmatch(r'(?:auto ?)?(?:[0-9]+ ?)?(?:reject)?', ' '.join(tail)):
-                raise ValueError('Unsupported route options')
             metric = next((x for x in tail if x.isdigit()), None)
+            suffix = (['auto'] if 'auto' in tail else []) + ([metric] if metric else []) + (['reject'] if 'reject' in tail else [])
+            if tail != suffix:
+                raise ValueError('Unsupported route options')
             if metric and (self.kind == 'dns' or int(metric) > 65535):
                 raise ValueError('Invalid metric')
             if 'reject' in tail and ('auto' not in tail or (self.kind == 'route' and self.network.prefixlen == 0)):
                 raise ValueError('Invalid exclusive route')
-            suffix = (['auto'] if 'auto' in tail else []) + ([metric] if metric else []) + (['reject'] if 'reject' in tail else [])
             self.remove = 'no ' + ' '.join(prefix + [self.iface] + ([metric] if metric else []))
         self.prefix, self.suffix = prefix, suffix
         self.command = ' '.join(prefix + [self.iface] + suffix)
@@ -332,10 +347,13 @@ class Failover:
         self.recovered.clear()
 
     def configure(self, source, target):
-        tunnels = {t['profile']:t for t in self.app.status()['tunnels']}
-        if not isinstance(source, str) or source not in tunnels or not tunnels[source]['interface']:
+        if not isinstance(source, str) or (target is not None and not isinstance(target, str)):
             raise PanelError(400, 'Unknown tunnel.')
-        if target is not None and (not isinstance(target, str) or target not in tunnels or not tunnels[target]['interface']):
+        sampled, _, _ = self.app.tunnel_states({source, target})
+        tunnels = {t['profile']:t for t in sampled}
+        if source not in tunnels or not tunnels[source]['interface']:
+            raise PanelError(400, 'Unknown tunnel.')
+        if target is not None and (target not in tunnels or not tunnels[target]['interface']):
             raise PanelError(400, 'failover_unknown_backup')
         if source == target: raise PanelError(400, 'failover_cycle')
         pairs = self.pairs()
@@ -372,33 +390,33 @@ class Failover:
     def desired_targets(self, pairs, tunnels, previous):
         via = {}
         now = self.clock()
-        def enabled(t):
-            return t and not t['paused'] and not t['stopped'] and t.get('started', False)
-        def healthy(t):
-            return enabled(t) and t['engine'] and t['ping'] == 'pass'
         for source in pairs:
             primary = tunnels.get(source)
-            if not enabled(primary):
+            if not primary or primary['health'] == 'stopped':
                 self.recovered.pop(source, None)
                 continue
             old = previous.get(source)
-            if healthy(primary):
+            old_health = tunnels.get(old, {}).get('health')
+            can_keep_old = old_health in ('pass', 'unknown')
+            if primary['health'] == 'pass':
                 since = self.recovered.setdefault(source, now)
-                if old and healthy(tunnels.get(old)) and now-since < 30:
+                if can_keep_old and now-since < 30:
                     via[source] = old
                 continue
             self.recovered.pop(source, None)
-            if primary['ping'] != 'fail':
-                if old and healthy(tunnels.get(old)): via[source] = old
+            if primary['health'] != 'fail':
+                if can_keep_old: via[source] = old
                 continue
             node, seen = source, set()
             while node in pairs and node not in seen:
                 seen.add(node); node = pairs[node]
                 candidate = tunnels.get(node)
-                if healthy(candidate):
+                if candidate and candidate['health'] == 'pass':
                     via[source] = node
                     break
-                if not enabled(candidate) or candidate['ping'] != 'fail': break
+                if not candidate or candidate['health'] != 'fail': break
+            if source not in via and can_keep_old:
+                via[source] = old
         return via
 
     def tick(self):
@@ -410,8 +428,9 @@ class Failover:
             with self.lock():
                 if record and record['phase'] == 'pending':
                     self.restore(record); record = {}
-                status = self.app.status()
-                tunnels = {t['profile']:dict(t, started=status['started']) for t in status['tunnels']}
+                selected = set(pairs) | set(pairs.values())
+                sampled, _, _ = self.app.tunnel_states(selected)
+                tunnels = {t['profile']:t for t in sampled}
                 current, unsupported = self.snapshot()
                 if record:
                     before_rules = {FailoverRule(x).key: x for x in record['before']}
@@ -450,6 +469,7 @@ class Failover:
                             for word in output.replace(',', ' ').split():
                                 try: allowed[target].append(ipaddress.IPv4Network(word))
                                 except ValueError: pass
+                            allowed[target] = list(ipaddress.collapse_addresses(allowed[target]))
                         network = rule.network if rule.kind == 'route' else ipaddress.IPv4Network('0.0.0.0/0')
                         if not any(network.subnet_of(n) for n in allowed[target]):
                             raise PanelError(400, 'failover_backup_coverage')
@@ -473,12 +493,17 @@ class Failover:
                 if record and record['before'] == before and record['after'] == after and record['via'] == via:
                     self.error = ''
                     return
-                if record: self.restore(record)
                 if not before and not after:
+                    if record: self.restore(record)
                     self.error = 'failover_no_routes' if via else ''
                     return
                 # Both endpoints of every change are saved BEFORE the first mutation.
-                record = {'phase':'pending', 'before':before, 'after':after, 'via':via}
+                next_record = {'phase':'pending', 'before':before, 'after':after, 'via':via}
+                # A journal must remain readable after a crash between commands.
+                if max(len(before), len(after)) > 10000 or len(json.dumps(next_record)) > 2*1024*1024:
+                    raise PanelError(400, 'failover_journal_too_large')
+                if record: self.restore(record)
+                record = next_record
                 private_json(self.journal, record)
                 try:
                     after_keys = {FailoverRule(x).key for x in after}
@@ -567,8 +592,18 @@ class Application:
             result.append(path.stem)
         return result[:100]
 
-    def status(self):
+    def observation(self, args, timeout):
+        try:
+            return self.runner(args, timeout)
+        except (PanelError, OSError):
+            # An unavailable diagnostic is not proof of an outage.
+            return None, ''
+
+    def tunnel_states(self, selected=None):
         tunnels = []
+        profiles = set(self.profiles())
+        if selected is not None:
+            profiles.intersection_update(selected)
         state = self.base/'managed.tsv'
         if state.exists():
             for line in state.read_text().splitlines()[:100]:
@@ -577,32 +612,29 @@ class Application:
                 path, idx, ndms = fields
                 if not re.fullmatch(r'(0|[1-9][0-9]?)', idx) or ndms != 'OpkgTun'+idx: continue
                 name = Path(path).stem
-                if not NAME.fullmatch(name) or Path(path) != self.base/'conf'/(name+'.conf') or name not in self.profiles(): continue
-                rc, hs = self.runner([AWG, 'show', 'opkgtun'+idx, 'latest-handshakes'], 5)
+                if name not in profiles or Path(path) != self.base/'conf'/(name+'.conf'): continue
+                rc, hs = self.observation([AWG, 'show', 'opkgtun'+idx, 'latest-handshakes'], 5)
+                link_rc, interface_info = self.observation(['ndmc', '-c', 'show interface '+ndms], 5)
+                link = firmware_link(interface_info, ndms) if link_rc == 0 else 'unknown'
                 received = sent = handshake = 0
-                if not rc:
+                if rc == 0 and selected is None:
                     for row in hs.splitlines():
                         pieces = row.split()
                         if len(pieces) == 2 and pieces[1].isdigit(): handshake = max(handshake, int(pieces[1]))
-                    rc2, traffic = self.runner([AWG, 'show', 'opkgtun'+idx, 'transfer'], 5)
-                    if not rc2:
+                    rc2, traffic = self.observation([AWG, 'show', 'opkgtun'+idx, 'transfer'], 5)
+                    if rc2 == 0:
                         for row in traffic.splitlines():
                             pieces = row.split()
                             if len(pieces) == 3 and all(x.isdigit() for x in pieces[1:]):
                                 received += int(pieces[1]); sent += int(pieces[2])
-                tunnels.append({'profile': name, 'interface': ndms, 'engine': rc == 0,
+                tunnels.append({'profile': name, 'interface': ndms, 'engine': None if rc is None else rc == 0, 'link': link,
                                 'handshake': handshake, 'received': received, 'sent': sent})
         mapped = {tunnel['profile'] for tunnel in tunnels}
-        for name in self.profiles():
+        for name in sorted(profiles):
             if name not in mapped:
-                tunnels.append({'profile':name, 'interface':None, 'engine':False,
+                tunnels.append({'profile':name, 'interface':None, 'engine':False, 'link':'unknown',
                                 'handshake':0, 'received':0, 'sent':0})
-        backups = []
-        for path in sorted((self.base/'backups/imports').glob('*'), key=lambda p:p.stat().st_mtime, reverse=True)[:50]:
-            name, _, suffix = path.name.rpartition('.')
-            if NAME.fullmatch(name) and re.fullmatch(r'[A-Za-z0-9]{6}', suffix) and not path.is_symlink() and path.is_file():
-                backups.append({'id': path.name, 'profile': name, 'time': int(path.stat().st_mtime)})
-        rc, ping = self.runner(['ndmc', '-c', 'show ping-check'], 8)
+        rc, ping = self.observation(['ndmc', '-c', 'show ping-check'], 8)
         checks = ping_states(ping) if rc == 0 else {}
         started = (self.runpath/'running').exists()
         for tunnel in tunnels:
@@ -610,9 +642,32 @@ class Application:
             tunnel['ping'] = check
             tunnel['paused'] = (self.base/'paused'/tunnel['profile']).exists()
             tunnel['stopped'] = bool(tunnel['interface'] and (self.runpath/('stopped-'+tunnel['interface'][7:])).exists())
-            tunnel['active'] = started and tunnel['engine'] and not tunnel['paused'] and not tunnel['stopped']
-            tunnel['connection'] = ('disconnected' if not tunnel['active'] or check == 'fail'
-                                    else 'connected' if check == 'pass' else 'unverified')
+            enabled = started and tunnel['interface'] and not tunnel['paused'] and not tunnel['stopped']
+            tunnel['active'] = bool(enabled and tunnel['engine'])
+            if not enabled:
+                health = 'stopped'
+            elif tunnel['link'] == 'down' or tunnel['engine'] is False or check == 'fail':
+                health = 'fail'
+            elif tunnel['engine'] and tunnel['link'] == 'up' and check == 'pass':
+                health = 'pass'
+            else:
+                health = 'unknown'
+            tunnel['health'] = health
+            tunnel['connection'] = {'stopped':'disconnected', 'fail':'disconnected',
+                                    'pass':'connected', 'unknown':'unverified'}[health]
+        return tunnels, started, clean_diagnostic(ping) if rc == 0 else 'PingCheck unavailable'
+
+    def status(self):
+        tunnels, started, ping = self.tunnel_states()
+        backups = []
+        for path in (self.base/'backups/imports').glob('*'):
+            name, _, suffix = path.name.rpartition('.')
+            if NAME.fullmatch(name) and re.fullmatch(r'[A-Za-z0-9]{6}', suffix) and not path.is_symlink() and path.is_file():
+                try: modified = path.stat().st_mtime
+                except FileNotFoundError: continue
+                backups.append({'id': path.name, 'profile': name, 'time': int(modified)})
+        backups.sort(key=lambda b:b['time'], reverse=True)
+        for tunnel in tunnels:
             label = self.base/'names'/tunnel['profile']
             text = label.read_text().strip() if label.is_file() and not label.is_symlink() else ''
             tunnel['name'] = text if re.fullmatch(r'[A-Za-z0-9_. -]{1,64}', text) else tunnel['profile']
@@ -625,15 +680,18 @@ class Application:
             tunnel['backup'] = pairs.get(tunnel['profile'])
             tunnel['via'] = failover_state.get('via', {}).get(tunnel['profile']) if failover_state.get('phase') == 'active' else None
         active = any(tunnel['active'] for tunnel in tunnels)
-        return {'running': active, 'started': started, 'profiles': self.profiles(), 'tunnels': tunnels, 'backups': backups,
+        return {'running': active, 'started': started, 'profiles': self.profiles(), 'tunnels': tunnels, 'backups': backups[:50],
                 'enabled': (self.base/'enabled').exists(),
                 'watchdog': (self.base/'watchdog-enabled').exists(),
-                'pingcheck': clean_diagnostic(ping) if rc == 0 else 'PingCheck unavailable',
+                'pingcheck': ping,
                 'busy': self.operation.locked(), 'update': self.updater.status(), 'failover_error':failover_error}
 
     def ndmc(self, text):
         rc, output = self.runner(['ndmc', '-c', text], 12)
-        if rc or re.search(r'\b(?:error\[|error:|failed|invalid)', output, re.I):
+        # A configuration may contain words such as "failed" in a description.
+        pattern = (r'^[ \t]*(?:[\w.-]+(?:::[\w.-]+)+[ \t]+)?(?:error\[|error:|failed\b|invalid\b)'
+                   if text == 'show running-config' else r'\b(?:error\[|error:|failed|invalid)')
+        if rc or re.search(pattern, output, re.I | re.M):
             # Do not return firmware output: running-config can contain secrets.
             raise PanelError(400, 'Firmware command failed: ' + text.split()[0])
         return output
@@ -757,8 +815,6 @@ class Application:
                 name = body.get('name')
                 if isinstance(name, str) and (name in pairs or name in pairs.values()):
                     raise PanelError(409, 'failover_tunnel_in_use')
-            if action in ('stop', 'tunnel-down', 'delete') and self.failover.record():
-                self.failover.reset()
             if action in ('pingcheck-apply', 'pingcheck-disable', 'pingcheck-save'):
                 return self.pingcheck_action(body)
             if action in ('up','stop','enable','disable'):
@@ -800,6 +856,8 @@ class Application:
                     os.chmod(path, 0o600)
                     return self.run_action([SERVICE, action, str(path), name])
             else: raise PanelError(400, 'Unknown action.')
+            if action in ('stop', 'tunnel-down', 'delete') and self.failover.record():
+                self.failover.reset()
             return self.run_action(args)
         except updates.UpdateError as error:
             raise PanelError(400, str(error)) from None

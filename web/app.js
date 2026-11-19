@@ -41,7 +41,12 @@ function updateButtons(){
 }
 function translate(){document.documentElement.lang=lang;$('language').textContent=lang==='ru'?'EN':'RU';for(const [el,text] of original)el.textContent=lang==='en'?(en[el.dataset.i18n]||text):text;if(state)render(state);}
 function bytes(n){for(const unit of ['B','KiB','MiB','GiB','TiB']){if(n<1024||unit==='TiB')return `${n.toFixed(n<10?1:0)} ${unit}`;n/=1024;}}
-function statusTag(tunnel){return node('span',t(tunnel.connection),'tag'+(tunnel.connection!=='connected'?' off':''));}
+Object.assign(ru,{onBackup:'На резерве',failover_journal_too_large:'Список изменений слишком велик для журнала восстановления.'});
+Object.assign(en,{onBackup:'Using backup',failover_journal_too_large:'The route changes exceed the recovery journal limit.'});
+function statusTag(tunnel){
+ const onBackup=tunnel.via&&state.tunnels.some(x=>x.profile===tunnel.via&&x.health==='pass')&&!state.failover_error;
+ return node('span',t(onBackup?'onBackup':tunnel.connection),'tag'+(onBackup||tunnel.connection==='connected'?'':' off'));
+}
 function openEditor(name){
  closeEditor();selected=name;creating=name===null;backupDirty=false;$('tunnel-editor').hidden=false;showView('tunnels');
  $('profile-name').value=creating?'':name;$('profile-name').readOnly=!creating;
@@ -61,13 +66,13 @@ function renderEditor(){
  if(choice&&![...$('backup-tunnel').options].some(x=>x.value===choice))$('backup-tunnel').append(new Option(choice,choice));
  $('backup-tunnel').value=choice;
  const label=name=>state.tunnels.find(x=>x.profile===name)?.name||name;
- $('backup-status').textContent=state.failover_error?t(state.failover_error):tunnel?.via?t('backupVia')+label(tunnel.via):tunnel?.backup?(tunnel.ping==='fail'?t('backupWaiting'):t('backupReady')+label(tunnel.backup)):t('backupNone');
+ $('backup-status').textContent=state.failover_error?t(state.failover_error):tunnel?.via?t('backupVia')+label(tunnel.via):tunnel?.backup?(tunnel.health==='fail'?t('backupWaiting'):t('backupReady')+label(tunnel.backup)):t('backupNone');
  $('profile-settings').querySelector('h2').textContent=creating?t('addTunnel'):t('replaceKey');
  $('import-form').querySelector('button').textContent=creating?t('createStart'):t('apply');
  $('profile-settings').querySelectorAll('.card')[1].hidden=creating;
  $('ping-interface').value=tunnel?.interface||'';
  $('ping-target').textContent=tunnel?`${tunnel.name} · ${tunnel.interface||'—'}`:'';
- $('pingcheck').textContent=tunnel?`${tunnel.interface||'—'}: ${t(tunnel.connection)}`:'—';
+ $('pingcheck').textContent=tunnel?`${tunnel.interface||'—'} · PingCheck ${tunnel.ping} · Netcraze ${tunnel.link}`:'—';
  $('backup-list').replaceChildren();const backups=state.backups.filter(x=>x.profile===selected);
  if(!backups.length)$('backup-list').append(node('p',t('noBackups'),'caption'));
  for(const backup of backups){const row=node('div',undefined,'backup-row'),button=node('button',t('restore'));row.append(node('small',new Date(backup.time*1000).toLocaleString(lang)),button);button.onclick=()=>{if(confirm(t('confirmRestore')+tunnel.name))perform(async()=>{notice((await api('/api/action',{action:'restore',backup:backup.id})).message);await refresh();});};$('backup-list').append(row);}

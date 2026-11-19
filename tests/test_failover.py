@@ -21,6 +21,8 @@ class FailoverTests(unittest.TestCase):
             (self.base/'conf'/(name+'.conf')).touch()
         (self.base/'managed.tsv').write_text(''.join(str(self.base/'conf'/(n+'.conf'))+'\t'+str(i)+'\tOpkgTun'+str(i)+'\n' for i,n in enumerate(('a','b','c'))))
         self.health = ['pass','pass','pass']
+        self.links = ['up', 'up', 'up']
+        self.engines = [True, True, True]
         self.assignments = {0,1,2}
         self.calls = []
         self.failure = None
@@ -58,13 +60,21 @@ class FailoverTests(unittest.TestCase):
     def runner(self, args, timeout=75):
         self.calls.append(args)
         if args[0] == w.AWG:
+            if not self.engines[int(args[2][7:])]:
+                return 1, ''
             if args[-1] == 'allowed-ips': return 0,'peer '+self.allowed
             return 0, 'peer 123 456' if args[-1] == 'transfer' else 'peer 123'
         if args[0] != 'ndmc': return 0, 'OK'
         cmd = args[-1]
+        if cmd.startswith('show interface OpkgTun'):
+            iface = cmd.split()[-1]
+            link = self.links[int(iface[7:])]
+            if link is None: return 1, ''
+            connected = 'yes' if link == 'up' else 'no'
+            return 0, f'id: {iface}\ntype: OpkgTun\nlink: {link}\nconnected: {connected}\nstate: up\nsummary:\n layer:\n  link: running'
         if cmd == 'show running-config': return 0, self.config()
         if cmd == 'show ping-check':
-            return 0, '\n'.join('interface:\n name: OpkgTun'+str(i)+'\n status: '+s for i,s in enumerate(self.health))
+            return 0, '\n'.join('interface:\n name: OpkgTun'+str(i)+'\n status: '+s for i,s in enumerate(self.health) if s is not None)
         if self.failure and self.failure(cmd):
             if self.fail_once: self.failure = None
             return 0, 'Command::Base error[123]: rejected'
@@ -95,7 +105,7 @@ class FailoverTests(unittest.TestCase):
     def active_routes(self):
         return {r.command for r in self.rules.values()}
 
-    def fail(self):
+    def fail_primary(self):
         self.health[0] = 'fail'
         self.app.failover.tick()
         self.assertEqual(self.app.failover.error, '')
@@ -105,7 +115,7 @@ class FailoverTests(unittest.TestCase):
         self.calls.clear()
         self.app.failover.tick()
         self.assertEqual(self.commands(), [])
-        self.fail()
+        self.fail_primary()
         self.assertIn(self.route(1), self.active_routes())
         self.assertNotIn(self.route(), self.active_routes())
         self.assertIn('ip route 198.51.100.0 255.255.255.0 OpkgTun2 auto', self.active_routes())
@@ -139,20 +149,61 @@ class FailoverTests(unittest.TestCase):
         self.app.failover.tick()
         self.assertIn(self.route(), self.active_routes())
 
+    def test_inactive_primary_without_ping_entry_switches_and_recovers(self):
+        self.configure()
+        self.health[0] = None
+        self.links[0] = 'down'
+        self.app.failover.tick()
+        self.assertIn(self.route(1), self.active_routes())
+        self.health[0] = 'pass'  # Stale success while firmware still reports down.
+        self.now += 60
+        self.app.failover.tick()
+        self.assertIn(self.route(1), self.active_routes())
+        self.links[0] = 'up'
+        self.app.failover.tick()
+        self.assertIn(self.route(1), self.active_routes())
+        self.now += 30
+        self.app.failover.tick()
+        self.assertEqual(self.app.failover.error, '')
+        self.assertIn(self.route(), self.active_routes())
+
+    def test_dead_primary_engine_without_ping_can_use_live_backup(self):
+        self.configure()
+        self.engines[0] = False
+        self.health[0] = None
+        self.app.failover.tick()
+        self.assertIn(self.route(1), self.active_routes())
+
+    def test_inactive_backup_is_rejected_even_with_stale_pass(self):
+        self.configure()
+        self.links[1] = 'down'
+        self.fail_primary()
+        self.assertIn(self.route(), self.active_routes())
+
+    def test_lost_telemetry_does_not_undo_active_backup(self):
+        self.configure()
+        self.fail_primary()
+        self.health = [None, None, None]
+        self.links = [None, None, None]
+        self.calls.clear()
+        self.app.failover.tick()
+        self.assertEqual(self.commands(), [])
+        self.assertIn(self.route(1), self.active_routes())
+
     def test_manual_stop_is_not_an_outage(self):
         self.configure()
         (self.base/'paused').mkdir()
         (self.base/'paused/a').touch()
-        self.fail()
+        self.fail_primary()
         self.assertIn(self.route(), self.active_routes())
         (self.base/'paused/a').unlink()
-        self.fail()
+        self.fail_primary()
         (self.base/'run/running').unlink()
         self.app.failover.tick()
         self.assertIn(self.route(), self.active_routes())
 
     def test_backup_failure_restores_original_behavior(self):
-        self.configure(); self.fail()
+        self.configure(); self.fail_primary()
         self.health[1] = 'fail'
         self.app.failover.tick()
         self.assertIn(self.route(), self.active_routes())
@@ -171,7 +222,7 @@ class FailoverTests(unittest.TestCase):
         self.assertEqual(self.app.status()['tunnels'][0]['via'], 'c')
 
     def test_disabling_restores_routes_before_saving_choice(self):
-        self.configure(); self.fail()
+        self.configure(); self.fail_primary()
         self.configure('a',None)
         self.assertEqual(self.app.failover.pairs(), {})
         self.assertIn(self.route(), self.active_routes())
@@ -180,7 +231,7 @@ class FailoverTests(unittest.TestCase):
         dns = 'dns-proxy route object-group domain-list0 OpkgTun0 auto reject'
         policy = 'ip policy Policy0 permit global OpkgTun0 order 0'
         self.add(dns); self.add(policy)
-        self.configure(); self.fail()
+        self.configure(); self.fail_primary()
         self.assertIn(dns.replace('OpkgTun0','OpkgTun1'), self.active_routes())
         self.assertIn(policy.replace('OpkgTun0','OpkgTun1'), self.active_routes())
         self.app.failover.reset()
@@ -189,7 +240,7 @@ class FailoverTests(unittest.TestCase):
 
     def test_existing_backup_route_is_never_removed_on_restore(self):
         self.add(self.route(1))
-        self.configure(); self.fail()
+        self.configure(); self.fail_primary()
         self.app.failover.reset()
         self.assertIn(self.route(1), self.active_routes())
         self.assertIn(self.route(), self.active_routes())
@@ -207,6 +258,31 @@ class FailoverTests(unittest.TestCase):
         self.assertEqual(self.app.failover.error,'failover_backup_coverage')
         self.assertEqual(self.commands(),[])
 
+    def test_adjacent_allowed_ranges_cover_policy(self):
+        self.add('ip policy Policy0 permit global OpkgTun0 order 0')
+        self.allowed = '0.0.0.0/1, 128.0.0.0/1'
+        self.configure()
+        self.fail_primary()
+        self.assertIn(self.route(1), self.active_routes())
+
+    def test_rejected_pause_leaves_active_backup_in_place(self):
+        self.configure()
+        self.fail_primary()
+        self.calls.clear()
+        with self.assertRaises(w.PanelError):
+            self.app.execute({'action':'tunnel-down','name':'missing'})
+        self.assertEqual(self.commands(), [])
+        self.assertIn(self.route(1), self.active_routes())
+
+    def test_config_description_is_not_a_firmware_error(self):
+        config = self.config
+        self.config = lambda: config() + 'interface ISP\n    description failed over\n!\n'
+        self.configure()
+        self.fail_primary()
+        self.app.runner = lambda args, timeout: (0, 'Command::Base error[123]: rejected')
+        with self.assertRaises(w.PanelError):
+            self.app.ndmc('show running-config')
+
     def policy_setup(self):
         self.policy_renumber = True
         for i,iface in enumerate(('OpkgTun0','OpkgTun1','OpkgTun2','GigabitEthernet1')):
@@ -215,7 +291,7 @@ class FailoverTests(unittest.TestCase):
     def test_policy_with_existing_backup_and_renumbering(self):
         self.policy_setup()
         original = self.active_routes()
-        self.configure(); self.fail()
+        self.configure(); self.fail_primary()
         self.assertIn('ip policy Policy0 permit global OpkgTun1 order 0',self.active_routes())
         self.assertIn('ip policy Policy0 permit global GigabitEthernet1 order 2',self.active_routes())
         self.app.failover.reset()
@@ -261,7 +337,7 @@ class FailoverTests(unittest.TestCase):
         self.assertNotIn(self.route(1),self.active_routes())
 
     def test_pending_journal_recovers_after_restart(self):
-        self.configure(); self.fail()
+        self.configure(); self.fail_primary()
         record = self.app.failover.record();record['phase']='pending'
         w.private_json(self.app.failover.journal,record)
         self.app.failover = w.Failover(self.app,lambda:self.now)
@@ -273,7 +349,7 @@ class FailoverTests(unittest.TestCase):
     def test_interrupted_return_keeps_recoverable_journal(self):
         self.policy_setup()
         original = self.active_routes()
-        self.configure(); self.fail()
+        self.configure(); self.fail_primary()
         self.failure = lambda cmd: cmd == self.route()
         self.fail_once = True
         with self.assertRaises(w.PanelError): self.app.failover.reset()
@@ -289,13 +365,13 @@ class FailoverTests(unittest.TestCase):
         for order,iface in enumerate(('OpkgTun2','GigabitEthernet1','OpkgTun0','OpkgTun1')):
             self.add('ip policy Policy0 permit global '+iface+' order '+str(order))
         original = self.active_routes()
-        self.configure(); self.fail()
+        self.configure(); self.fail_primary()
         self.assertIn('ip policy Policy0 permit global OpkgTun1 order 2', self.active_routes())
         self.app.failover.reset()
         self.assertEqual(self.active_routes(), original)
 
     def test_reboot_with_original_startup_routes(self):
-        self.configure(); self.fail()
+        self.configure(); self.fail_primary()
         self.rules.pop(w.FailoverRule(self.route(1)).key)
         self.add(self.route())
         self.health[0] = 'pass'
@@ -305,7 +381,7 @@ class FailoverTests(unittest.TestCase):
         self.assertEqual(self.app.failover.error,'')
 
     def test_external_route_change_is_not_overwritten(self):
-        self.configure(); self.fail()
+        self.configure(); self.fail_primary()
         self.add(self.route(1).replace(' auto reject',' auto'))
         self.calls.clear()
         self.app.failover.tick()
@@ -330,7 +406,7 @@ class FailoverTests(unittest.TestCase):
         self.configure()
         for body in ({'action':'delete','name':'b'}, {'action':'pingcheck-disable','interface':'OpkgTun0'}):
             with self.assertRaises(w.PanelError):self.app.execute(body)
-        self.fail()
+        self.fail_primary()
         with self.assertRaises(w.PanelError):self.app.execute({'action':'pingcheck-save'})
 
     def test_configuration_validation_and_journal_contains_no_secrets(self):
@@ -339,12 +415,17 @@ class FailoverTests(unittest.TestCase):
         self.assignments.remove(1)
         with self.assertRaises(w.PanelError):self.configure()
         self.assignments.add(1)
-        self.configure();self.fail()
+        self.configure();self.fail_primary()
         self.assertNotIn('NEVER_WRITE_THIS',self.app.failover.journal.read_text())
         self.assertEqual(self.app.failover.pairs(),{'a':'b'})
 
 
 class RuleTests(unittest.TestCase):
+    def test_joined_route_options_are_not_normalized_away(self):
+        for flags in ('autoreject', 'auto12', '12reject'):
+            _,unsupported = w.routing_rules('ip route 203.0.113.1 OpkgTun0 '+flags)
+            self.assertEqual(unsupported, {'OpkgTun0'})
+
     def test_route_with_unrecognized_child_is_unsupported(self):
         _,unsupported = w.routing_rules('ip route 203.0.113.1 OpkgTun0 auto\n    disable\n')
         self.assertEqual(unsupported, {'OpkgTun0'})

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.1
+
+- Backup selection now checks the Netcraze interface and VPN engine alongside PingCheck. A down primary can switch even after its PingCheck entry disappears. Temporary loss of observations preserves an active backup.
+- Tunnel cards show when backup routing is in use. Diagnostics show PingCheck and firmware interface state separately.
+
 ## 0.10.0
 
 - Per-tunnel backup selection. IP/domain lists remain in Netcraze; no duplicate lists in the panel.
