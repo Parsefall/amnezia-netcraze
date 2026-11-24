@@ -71,6 +71,22 @@ class PingTests(unittest.TestCase):
         for label in ['bad"name', '../escape', 'x;reboot', '', 'x\nup']:
             with self.assertRaises(w.PanelError): self.app.execute({'action':'rename','name':'pars','label':label})
         self.assertEqual(self.calls, [])
+    def test_handshake_age_and_explicit_stop(self):
+        state = dict(engine=True, health='unknown', handshake=949, ping='unknown', link='unknown')
+        for patch, expected in [
+            ({}, 'peerResponded'),
+            ({'health':'fail','link':'down','handshake':918}, 'peerResponded'),
+            ({'health':'stopped'}, 'disconnected'),
+            ({'handshake':0}, 'noHandshake'),
+            ({'handshake':0,'ping':'fail'}, 'probeFailed'),
+            ({'handshake':819,'link':'down'}, 'linkDown'),
+            ({'handshake':819}, 'unverified'),
+            ({'handshake':1001}, 'unverified'),
+            ({'engine':False}, 'engineUnavailable'),
+            ({'engine':None,'handshake':None}, 'unverified'),
+        ]:
+            with self.subTest(patch=patch):
+                self.assertEqual(w.display_connection(dict(state, **patch), 1000), expected)
     def test_apply_preserves_shared_profile_and_does_not_save(self):
         result = self.app.execute(self.body)
         created = self.calls[1].split()[-1]

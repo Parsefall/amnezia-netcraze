@@ -85,8 +85,57 @@ class PanelTests(unittest.TestCase):
         self.assertIn("frame-ancestors 'none'",headers['Content-Security-Policy'])
     def test_unauthenticated_actions_and_state(self):
         self.assertEqual(self.request('GET','/api/status')[0],401)
+        self.assertEqual(self.request('GET','/api/status?view=panel')[0],401)
         self.assertEqual(self.request('POST','/api/action',{'action':'up'})[0],401)
         self.assertEqual(self.calls,[])
+    def test_slow_pingcheck_does_not_block_panel_or_duplicate_probes(self):
+        entered = threading.Event()
+        release = threading.Event()
+        checks = []
+        self.app.runpath.mkdir()
+        (self.app.runpath/'running').touch()
+        def runner(args, timeout):
+            if args[-1] == 'show ping-check':
+                checks.append(1)
+                entered.set()
+                if not release.wait(5): raise TimeoutError()
+                return 0, 'interface: OpkgTun0\nstatus: fail'
+            if args[-1] == 'latest-handshakes':
+                return 0, 'peer ' + str(int(time.time()) - 51)
+            return self.runner(args, timeout)
+        self.app.runner = runner
+        self.login()
+        def panel():
+            status, _, body = self.request('GET','/api/status?view=panel')
+            self.assertEqual(status, 200)
+            return json.loads(body)
+        try:
+            first = panel()
+            self.assertEqual(first['profiles'], ['router'])
+            self.assertTrue(first['sampling'])
+            self.assertTrue(entered.wait(2))
+            deadline = time.monotonic() + 2
+            while True:
+                snapshot = panel()
+                tunnel = snapshot['tunnels'][0]
+                if tunnel['received'] is not None: break
+                self.assertLess(time.monotonic(), deadline)
+                time.sleep(.02)
+            self.assertTrue(snapshot['sampling'])
+            self.assertFalse(snapshot['busy'])
+            self.assertEqual(tunnel['connection'], 'peerResponded')
+            self.assertEqual(tunnel['received'], 1234)
+            self.assertEqual(checks, [1])
+        finally:
+            release.set()
+        deadline = time.monotonic() + 2
+        while True:
+            snapshot = panel()
+            if not snapshot['sampling']: break
+            self.assertLess(time.monotonic(), deadline)
+            time.sleep(.02)
+        tunnel = snapshot['tunnels'][0]
+        self.assertEqual((tunnel['connection'], tunnel['health'], tunnel['ping']), ('peerResponded','fail','fail'))
     def test_host_origin_csrf_and_lan(self):
         self.login()
         for headers in [{'Host':'evil.test'},{'Origin':'https://evil.test'},{'X-CSRF-Token':'wrong'}]:

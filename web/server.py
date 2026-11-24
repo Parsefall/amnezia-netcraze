@@ -42,6 +42,70 @@ class PanelError(Exception):
         self.code, self.message = code, message
 
 
+class PanelProbes:
+    """Read-only panel telemetry. Routing decisions always take their own sample."""
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.results = {}
+        self.pending = set()
+        self.queue = deque()
+        self.workers = 0
+
+    def collect(self):
+        while True:
+            with self.lock:
+                if not self.queue:
+                    self.workers -= 1
+                    return
+                observe, key, timeout, pending = self.queue.popleft()
+            try:
+                value = observe(list(key), timeout)
+            except Exception:
+                value = (None, '')
+            with self.lock:
+                if pending is self.pending:
+                    self.results[key] = value, time.monotonic()
+                    pending.discard(key)
+
+    def read(self, observe, args, timeout):
+        key = tuple(args)
+        with self.lock:
+            value, sampled = self.results.get(key, ((None, ''), None))
+            age = time.monotonic() - sampled if sampled is not None else float('inf')
+            if age >= 10 and key not in self.pending:
+                self.pending.add(key)
+                self.queue.append((observe, key, timeout, self.pending))
+                if self.workers < 3:
+                    threading.Thread(target=self.collect, name='panel-probe', daemon=False).start()
+                    self.workers += 1
+            return (value if age < 30 else (None, '')), key in self.pending
+
+    def invalidate(self):
+        with self.lock:
+            self.queue.clear()
+            self.pending = set()
+            self.results.clear()
+
+
+def display_connection(tunnel, now):
+    if tunnel['health'] == 'stopped':
+        return 'disconnected'
+    if tunnel['engine'] is False:
+        return 'engineUnavailable'
+    if tunnel['health'] == 'pass':
+        return 'connected'
+    stamp = tunnel['handshake']
+    if tunnel['engine'] and stamp and 0 <= now - stamp <= 180:
+        return 'peerResponded'
+    if tunnel['ping'] == 'fail':
+        return 'probeFailed'
+    if tunnel['link'] == 'down':
+        return 'linkDown'
+    if tunnel['engine'] and stamp == 0:
+        return 'noHandshake'
+    return 'unverified'
+
+
 def password_record(password):
     if not isinstance(password, str) or not 12 <= len(password) <= 128:
         raise PanelError(400, 'Password must contain 12–128 characters.')
@@ -419,18 +483,55 @@ class Failover:
                 via[source] = old
         return via
 
+    def service_generation(self, profiles):
+        # CLI actions do not increment the panel revision. A profile replacement
+        # or a new interface mapping invalidates health sampled before it.
+        paths = [self.app.base/'managed.tsv', self.app.runpath/'running']
+        paths.extend(self.app.base/'conf'/(name+'.conf') for name in sorted(profiles))
+        generation = []
+        for path in paths:
+            try:
+                info = path.stat()
+                generation.append((info.st_ino, info.st_mtime_ns, info.st_ctime_ns))
+            except FileNotFoundError:
+                generation.append(None)
+        return generation
+
     def tick(self):
-        if not self.app.operation.acquire(blocking=False): return
+        if self.app.operation.locked() or (self.app.runpath/'update.lock').exists(): return
+        locked = False
         try:
-            if (self.app.runpath/'update.lock').exists(): return
             pairs, record = self.pairs(), self.record()
             if not pairs and not record: return
+            if record.get('phase') == 'pending':
+                if not self.app.operation.acquire(blocking=False): return
+                locked = True
+                with self.lock():
+                    if record == self.record():
+                        self.restore(record)
+                        self.error = ''
+                return
+            revision = self.app.revision
+            selected = set(pairs) | set(pairs.values())
+            generation = self.service_generation(selected)
+            sampled, _, _ = self.app.tunnel_states(selected)
+            if not self.app.operation.acquire(blocking=False): return
+            locked = True
+            if revision != self.app.revision or pairs != self.pairs() or record != self.record(): return
             with self.lock():
-                if record and record['phase'] == 'pending':
-                    self.restore(record); record = {}
-                selected = set(pairs) | set(pairs.values())
-                sampled, _, _ = self.app.tunnel_states(selected)
+                if generation != self.service_generation(selected): return
+                # CLI service actions may also stop tunnels during sampling.
+                if not (self.app.runpath/'running').exists():
+                    for tunnel in sampled: tunnel['health'] = 'stopped'
+                for tunnel in sampled:
+                    iface = tunnel['interface']
+                    if (self.app.base/'paused'/tunnel['profile']).exists() or (iface and (self.app.runpath/('stopped-'+iface[7:])).exists()):
+                        tunnel['health'] = 'stopped'
                 tunnels = {t['profile']:t for t in sampled}
+                via = self.desired_targets(pairs, tunnels, record.get('via', {}))
+                if not record and not via:
+                    self.error = ''
+                    return
                 current, unsupported = self.snapshot()
                 if record:
                     before_rules = {FailoverRule(x).key: x for x in record['before']}
@@ -439,7 +540,7 @@ class Failover:
                     if all(k in current and current[k].command == v for k,v in before_rules.items()) and not added_keys & current.keys():
                         self.journal.unlink(missing_ok=True)
                         record = {}
-                via = self.desired_targets(pairs, tunnels, record.get('via', {}))
+                        via = self.desired_targets(pairs, tunnels, {})
                 # Reconstruct the user's routing configuration from the durable journal.
                 logical = dict(current)
                 if record:
@@ -534,7 +635,7 @@ class Failover:
         except (OSError, ValueError):
             self.error = 'failover_invalid_state'
         finally:
-            self.app.operation.release()
+            if locked: self.app.operation.release()
 
     def run(self):
         while not self.stop.is_set():
@@ -553,6 +654,8 @@ class Application:
         self.slots = threading.BoundedSemaphore(8)
         self.sessions, self.failures = {}, deque()
         self.auth_lock, self.operation = threading.Lock(), threading.Lock()
+        self.panel_probes = PanelProbes()
+        self.revision = 0
         self.failover = Failover(self)
 
     def login(self, password, transport='https'):
@@ -599,7 +702,9 @@ class Application:
             # An unavailable diagnostic is not proof of an outage.
             return None, ''
 
-    def tunnel_states(self, selected=None):
+    def tunnel_states(self, selected=None, observe=None):
+        if observe is None:
+            observe = self.observation
         tunnels = []
         profiles = set(self.profiles())
         if selected is not None:
@@ -613,16 +718,18 @@ class Application:
                 if not re.fullmatch(r'(0|[1-9][0-9]?)', idx) or ndms != 'OpkgTun'+idx: continue
                 name = Path(path).stem
                 if name not in profiles or Path(path) != self.base/'conf'/(name+'.conf'): continue
-                rc, hs = self.observation([AWG, 'show', 'opkgtun'+idx, 'latest-handshakes'], 5)
-                link_rc, interface_info = self.observation(['ndmc', '-c', 'show interface '+ndms], 5)
+                rc, hs = observe([AWG, 'show', 'opkgtun'+idx, 'latest-handshakes'], 5)
+                link_rc, interface_info = observe(['ndmc', '-c', 'show interface '+ndms], 5)
                 link = firmware_link(interface_info, ndms) if link_rc == 0 else 'unknown'
-                received = sent = handshake = 0
+                received = sent = handshake = None
                 if rc == 0 and selected is None:
+                    handshake = 0
                     for row in hs.splitlines():
                         pieces = row.split()
                         if len(pieces) == 2 and pieces[1].isdigit(): handshake = max(handshake, int(pieces[1]))
-                    rc2, traffic = self.observation([AWG, 'show', 'opkgtun'+idx, 'transfer'], 5)
+                    rc2, traffic = observe([AWG, 'show', 'opkgtun'+idx, 'transfer'], 5)
                     if rc2 == 0:
+                        received = sent = 0
                         for row in traffic.splitlines():
                             pieces = row.split()
                             if len(pieces) == 3 and all(x.isdigit() for x in pieces[1:]):
@@ -634,7 +741,7 @@ class Application:
             if name not in mapped:
                 tunnels.append({'profile':name, 'interface':None, 'engine':False, 'link':'unknown',
                                 'handshake':0, 'received':0, 'sent':0})
-        rc, ping = self.observation(['ndmc', '-c', 'show ping-check'], 8)
+        rc, ping = observe(['ndmc', '-c', 'show ping-check'], 8)
         checks = ping_states(ping) if rc == 0 else {}
         started = (self.runpath/'running').exists()
         for tunnel in tunnels:
@@ -653,12 +760,22 @@ class Application:
             else:
                 health = 'unknown'
             tunnel['health'] = health
-            tunnel['connection'] = {'stopped':'disconnected', 'fail':'disconnected',
-                                    'pass':'connected', 'unknown':'unverified'}[health]
+            tunnel['connection'] = display_connection(tunnel, time.time())
         return tunnels, started, clean_diagnostic(ping) if rc == 0 else 'PingCheck unavailable'
 
-    def status(self):
-        tunnels, started, ping = self.tunnel_states()
+    def panel_status(self):
+        pending = False
+        def observe(args, timeout):
+            nonlocal pending
+            result, in_progress = self.panel_probes.read(self.observation, args, timeout)
+            pending |= in_progress
+            return result
+        status = self.status(observe)
+        status['sampling'] = pending
+        return status
+
+    def status(self, observe=None):
+        tunnels, started, ping = self.tunnel_states(observe=observe)
         backups = []
         for path in (self.base/'backups/imports').glob('*'):
             name, _, suffix = path.name.rpartition('.')
@@ -862,6 +979,8 @@ class Application:
         except updates.UpdateError as error:
             raise PanelError(400, str(error)) from None
         finally:
+            self.revision += 1
+            self.panel_probes.invalidate()
             self.operation.release()
 
     def run_action(self, args):
@@ -939,6 +1058,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.path == '/api/session': return self.reply(200, {'csrf': csrf})
             if self.path == '/api/update/status': return self.reply(200, self.app.updater.status())
             if self.path == '/api/status': return self.reply(200, self.app.status())
+            if self.path == '/api/status?view=panel': return self.reply(200, self.app.panel_status())
             if self.path == '/api/log':
                 path = self.app.base.parent.parent/'var/log/awg3.log'
                 text = ''
@@ -1066,6 +1186,7 @@ def main():
             server.serve_forever(poll_interval=0.5)
         finally:
             app.failover.stop.set()
+            app.panel_probes.invalidate()
             # Finish/roll back the routing transaction before exiting; never leave
             # a detached ndmc command changing routes after the journal is restored.
             worker.join()

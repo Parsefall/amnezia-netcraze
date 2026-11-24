@@ -32,20 +32,23 @@ function updateButtons(){
  if(!state)return;
  const updating=Boolean(state.update?.active);
  if(updating)document.querySelectorAll('button,input,textarea,select').forEach(el=>{if(!['logout','language','refresh'].includes(el.id)&&!el.dataset.view)el.disabled=true;});
- const rules={up:state.running,stop:!state.started,enable:state.enabled,disable:!state.enabled};
+ const awaitingEngine=tunnel=>state.sampling&&state.started&&tunnel.interface&&!tunnel.paused&&!tunnel.stopped&&tunnel.engine==null;
+ const rules={up:state.running||state.tunnels.some(awaitingEngine),stop:!state.started,enable:state.enabled,disable:!state.enabled};
  for(const [action,disabled] of Object.entries(rules)){const el=document.querySelector('[data-action="'+action+'"]');if(el)el.disabled=busy||updating||state.busy||disabled;}
- for(const el of document.querySelectorAll('[data-tunnel-action]')){const tunnel=state.tunnels.find(x=>x.profile===el.dataset.name);el.disabled=busy||updating||state.busy||!tunnel||(el.dataset.tunnelAction==='tunnel-up'?tunnel.active:(!state.started||tunnel.paused||tunnel.stopped));}
+ for(const el of document.querySelectorAll('[data-tunnel-action]')){const tunnel=state.tunnels.find(x=>x.profile===el.dataset.name);el.disabled=busy||updating||state.busy||!tunnel||(el.dataset.tunnelAction==='tunnel-up'?tunnel.active||awaitingEngine(tunnel):(!state.started||!tunnel.interface||tunnel.paused||tunnel.stopped));}
  $('check-update').disabled=busy||updating;
  $('install-update').disabled=busy||updating||!updateInfo?.available;
  $('failover-form').querySelector('button').disabled=busy||updating||state.busy;
 }
 function translate(){document.documentElement.lang=lang;$('language').textContent=lang==='ru'?'EN':'RU';for(const [el,text] of original)el.textContent=lang==='en'?(en[el.dataset.i18n]||text):text;if(state)render(state);}
-function bytes(n){for(const unit of ['B','KiB','MiB','GiB','TiB']){if(n<1024||unit==='TiB')return `${n.toFixed(n<10?1:0)} ${unit}`;n/=1024;}}
+function bytes(n){if(n==null)return '—';for(const unit of ['B','KiB','MiB','GiB','TiB']){if(n<1024||unit==='TiB')return `${n.toFixed(n<10?1:0)} ${unit}`;n/=1024;}}
+Object.assign(ru,{peerResponded:'VPN-сервер ответил недавно',engineUnavailable:'Движок недоступен',probeFailed:'PingCheck не прошёл',linkDown:'Netcraze сообщает об отключении',noHandshake:'Ожидание handshake',sampling:'Обновляем показания…'});
+Object.assign(en,{peerResponded:'VPN peer responded',engineUnavailable:'Engine unavailable',probeFailed:'PingCheck failed',linkDown:'Netcraze reports link down',noHandshake:'Awaiting handshake',sampling:'Refreshing measurements…'});
 Object.assign(ru,{onBackup:'На резерве',failover_journal_too_large:'Список изменений слишком велик для журнала восстановления.'});
 Object.assign(en,{onBackup:'Using backup',failover_journal_too_large:'The route changes exceed the recovery journal limit.'});
 function statusTag(tunnel){
  const onBackup=tunnel.via&&state.tunnels.some(x=>x.profile===tunnel.via&&x.health==='pass')&&!state.failover_error;
- return node('span',t(onBackup?'onBackup':tunnel.connection),'tag'+(onBackup||tunnel.connection==='connected'?'':' off'));
+ return node('span',t(onBackup?'onBackup':tunnel.connection),'tag'+(onBackup||['connected','peerResponded'].includes(tunnel.connection)?'':' off'));
 }
 function openEditor(name){
  closeEditor();selected=name;creating=name===null;backupDirty=false;$('tunnel-editor').hidden=false;showView('tunnels');
@@ -79,7 +82,15 @@ function renderEditor(){
 }
 function render(s){
  renderUpdate(s.update);
- $('enabled-state').textContent=t(s.enabled?'enabled':'disabled');$('watchdog-state').textContent=t(s.watchdog?'enabled':'disabled');$('connection-state').textContent=t(s.tunnels.length&&s.tunnels.every(x=>x.connection==='connected')?'connected':s.tunnels.some(x=>x.connection==='unverified')?'unverified':s.tunnels.some(x=>x.connection==='connected')?'partial':'disconnected');$('updated').textContent=t('updated')+new Date().toLocaleTimeString(lang);
+ $('enabled-state').textContent=t(s.enabled?'enabled':'disabled');$('watchdog-state').textContent=t(s.watchdog?'enabled':'disabled');
+ const states=new Set(s.tunnels.map(x=>x.connection));
+ if(states.size>1){
+  const responding=s.tunnels.filter(x=>x.connection==='connected'||x.connection==='peerResponded').length;
+  $('connection-state').textContent=lang==='ru'?`Есть ответ: ${responding} из ${s.tunnels.length}`:`Responding: ${responding} of ${s.tunnels.length}`;
+ }else{
+  $('connection-state').textContent=t(s.tunnels[0]?.connection||'disconnected');
+ }
+ $('updated').textContent=s.sampling?t('sampling'):t('updated')+new Date().toLocaleTimeString(lang);
  $('overview-list').replaceChildren();$('tunnel-list').replaceChildren();
  if(!s.tunnels.length){$('overview-list').append(node('p',t('empty'),'muted'));$('tunnel-list').append(node('p',t('empty'),'muted'));}
  for(const tunnel of s.tunnels){
@@ -87,11 +98,31 @@ function render(s){
   if(tunnel.via)minimal.append(node('small',t('backupVia')+(s.tunnels.find(x=>x.profile===tunnel.via)?.name||tunnel.via),'caption'));
   const card=node('article',undefined,'card'),heading=node('div',undefined,'tunnel-heading'),gear=node('button','⚙','gear');gear.setAttribute('aria-label',t('tunnelSettings')+' '+tunnel.name);gear.title=t('tunnelSettings');gear.onclick=()=>openEditor(tunnel.profile);heading.append(node('h2',tunnel.name),gear);card.append(heading,statusTag(tunnel),node('p',tunnel.interface||t('needsInterface'),'caption'));
   const controls=node('div',undefined,'buttons');for(const [action,label] of [['tunnel-up','tunnelStart'],['tunnel-down','tunnelPause']]){const button=node('button',t(label));button.dataset.tunnelAction=action;button.dataset.name=tunnel.profile;button.onclick=()=>perform(async()=>{notice((await api('/api/action',{action,name:tunnel.profile})).message);await refresh();});controls.append(button);}card.append(controls);
-  const metrics=node('div',undefined,'metrics');for(const [label,value] of [['handshake',tunnel.handshake?new Date(tunnel.handshake*1000).toLocaleString(lang):t('never')],['received',bytes(tunnel.received)],['sent',bytes(tunnel.sent)]]){const metric=node('div',undefined,'metric');metric.append(node('strong',value),node('span',t(label)));metrics.append(metric);}card.append(metrics);$('tunnel-list').append(card);
+  if(tunnel.connection==='peerResponded'&&tunnel.health==='fail')card.append(node('p',t(tunnel.ping==='fail'?'probeFailed':'linkDown'),'caption'));
+  const metrics=node('div',undefined,'metrics');for(const [label,value] of [['handshake',tunnel.handshake==null?'—':tunnel.handshake?new Date(tunnel.handshake*1000).toLocaleString(lang):t('never')],['received',bytes(tunnel.received)],['sent',bytes(tunnel.sent)]]){const metric=node('div',undefined,'metric');metric.append(node('strong',value),node('span',t(label)));metrics.append(metric);}card.append(metrics);$('tunnel-list').append(card);
  }
  renderEditor();updateButtons();
 }
-async function refresh(){if(!csrf)return;state=await api('/api/status');render(state);}
+let pollTimer,refreshId=0;
+function scheduleRefresh(delay){
+ clearTimeout(pollTimer);
+ pollTimer=setTimeout(()=>{
+  if(!csrf)return;
+  if(busy||updateTimer||document.hidden){scheduleRefresh(1500);return;}
+  refresh().catch(error=>notice(error.message,true));
+ },delay);
+}
+async function refresh(){
+ if(!csrf)return;
+ const session=csrf,id=++refreshId;
+ clearTimeout(pollTimer);
+ try{
+  const result=await api('/api/status?view=panel');
+  if(session===csrf&&id===refreshId){state=result;render(state);}
+ }finally{
+  if(session===csrf&&id===refreshId)scheduleRefresh(state?.sampling||state?.busy?1500:15000);
+ }
+}
 $('language').onclick=()=>{lang=lang==='ru'?'en':'ru';localStorage.setItem('awg3-language',lang);translate();};
 $('login-form').onsubmit=event=>{event.preventDefault();perform(async()=>{const password=$('password').value;$('password').value='';csrf=(await api('/api/login',{password})).csrf;signedIn(true);$('notice').hidden=true;await refresh();});};
 $('logout').onclick=()=>perform(async()=>{await api('/api/logout',{});signedIn(false);$('notice').hidden=true;});
@@ -142,5 +173,4 @@ function watchUpdate(){
 $('check-update').onclick=()=>perform(async()=>{const info=await api('/api/action',{action:'update-check'});if(state)state.update=info;renderUpdate(info);});
 $('install-update').onclick=()=>{if(!updateInfo?.available||!confirm(t('updateConfirm')+updateInfo.latest))return;const version=updateInfo.latest;perform(async()=>{const info=await api('/api/action',{action:'update-start',version});if(state)state.update=info;renderUpdate(info);notice(t('updateReconnect'));watchUpdate();});};
 translate();
-(async()=>{try{csrf=(await api('/api/session')).csrf;signedIn(true);await refresh();}catch{signedIn(false);}})();
-setInterval(()=>{if(csrf&&!busy&&!updateTimer&&!document.hidden)refresh().catch(error=>notice(error.message,true));},15000);
+(async()=>{try{csrf=(await api('/api/session')).csrf;}catch{signedIn(false);return;}signedIn(true);refresh().catch(error=>notice(error.message,true));})();

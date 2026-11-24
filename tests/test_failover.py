@@ -110,6 +110,19 @@ class FailoverTests(unittest.TestCase):
         self.app.failover.tick()
         self.assertEqual(self.app.failover.error, '')
 
+    def test_action_during_slow_probe_invalidates_routing_sample(self):
+        self.configure()
+        self.health[0] = 'fail'
+        def runner(args, timeout=75):
+            if args[-1] == 'show ping-check':
+                self.assertFalse(self.app.operation.locked())
+                self.app.execute({'action':'disable'})
+            return self.runner(args, timeout)
+        self.app.runner = runner
+        self.app.failover.tick()
+        self.assertIn(self.route(), self.active_routes())
+        self.assertNotIn(self.route(1), self.active_routes())
+
     def test_failure_switches_only_owned_routes_and_returns_after_stable_success(self):
         self.configure()
         self.calls.clear()

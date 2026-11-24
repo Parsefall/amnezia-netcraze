@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.2
+
+- The panel loads the tunnel list immediately and updates diagnostics in the background. Counters show a dash until their values arrive.
+- Tunnel cards show a recent VPN handshake. A failed PingCheck or a firmware link-down report appears separately when it conflicts with a recent peer response.
+
 ## 0.10.1
 
 - Backup selection now checks the Netcraze interface and VPN engine alongside PingCheck. A down primary can switch even after its PingCheck entry disappears. Temporary loss of observations preserves an active backup.
